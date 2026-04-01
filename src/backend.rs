@@ -1,27 +1,19 @@
 /// Trait for pluggable computation backends.
 ///
 /// A backend controls how the inner computation loops of the inference ops
-/// are scheduled. The default [`SequentialBackend`] runs everything inline
-/// on the calling thread.
-///
-/// # Safety contract
+/// are scheduled.
+
 /// `defer_job` is given a pointer-sized `arg`. The backend **must** ensure
 /// all deferred closures have completed before `wait` returns and before the
 /// data pointed to by `arg` is dropped or moved.
 pub trait Backend {
     /// Schedule a single unit of work.
-    ///
-    /// Implementations may run it immediately or defer it to a thread pool.
     fn defer_job(func: fn(usize), arg: usize);
 
     /// Block until all jobs previously submitted via [`defer_job`] have completed.
     fn wait();
 
     /// Evaluates a function across a 2D grid, potentially in parallel.
-    ///
-    /// The default implementation distributes `ROWS * COLS` calls across the
-    /// backend's worker pool via [`defer_job`]. You should not need to
-    /// override this method.
     fn from_fn<T: Send, F, const ROWS: usize, const COLS: usize>(
         func: F,
     ) -> crate::buffer::Buffer2D<T, ROWS, COLS>
@@ -39,37 +31,40 @@ pub trait Backend {
         struct Ctx<'a, F, T> {
             func: &'a F,
             out_ptr: *mut MaybeUninit<T>,
-            next_job: AtomicUsize,
+            next_row: AtomicUsize,
         }
 
         let ctx = Ctx {
             func: &func,
             out_ptr,
-            next_job: AtomicUsize::new(0),
+            next_row: AtomicUsize::new(0),
         };
 
-        fn worker<F: Fn(usize, usize) -> T + Sync, T: Send, const R: usize, const C: usize>(
-            arg: usize,
-        ) {
+        fn worker<F, T, const R: usize, const C: usize>(arg: usize)
+        where
+            F: Fn(usize, usize) -> T + Sync,
+            T: Send,
+        {
             let ctx = unsafe { &*(arg as *const Ctx<'_, F, T>) };
-            let total = R * C;
             loop {
-                let idx = ctx.next_job.fetch_add(1, Ordering::Relaxed);
-                if idx >= total {
+                let row = ctx.next_row.fetch_add(1, Ordering::Relaxed);
+                if row >= R {
                     break;
                 }
-                // Column-major: idx = col * R + row
-                let row = idx % R;
-                let col = idx / R;
-                let val = (ctx.func)(row, col);
-                unsafe {
-                    ctx.out_ptr.add(idx).write(MaybeUninit::new(val));
+
+                // Compute a whole row (need to have bigger job for it to be worth)
+                for col in 0..C {
+                    let val = (ctx.func)(row, col);
+                    // Column-major: idx = col * R + row
+                    let idx = col * R + row;
+                    unsafe {
+                        ctx.out_ptr.add(idx).write(MaybeUninit::new(val));
+                    }
                 }
             }
         }
 
-        let total = ROWS * COLS;
-        for _ in 0..total {
+        for _ in 0..ROWS {
             Self::defer_job(worker::<F, T, ROWS, COLS>, &ctx as *const _ as usize);
         }
         Self::wait();
@@ -87,7 +82,7 @@ pub trait Backend {
 
 /// The default sequential backend.
 ///
-/// Every job submitted via [`defer_job`] is run immediately on the calling thread.
+/// Every job submitted is run immediately on the calling thread.
 pub struct SequentialBackend;
 
 impl Backend for SequentialBackend {
