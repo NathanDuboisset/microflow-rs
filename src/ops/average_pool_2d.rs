@@ -7,13 +7,9 @@ use simba::scalar::SupersetOf;
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
 use crate::quantize::Quantized;
-use crate::tensor::{Tensor4D, TensorView, TensorViewPadding};
+use crate::tensor::{Tensor4D, TensorView};
+use crate::ops_options::average_pool_2d::AveragePool2DOptions;
 
-pub struct AveragePool2DOptions {
-    pub fused_activation: FusedActivation,
-    pub view_padding: TensorViewPadding,
-    pub strides: (usize, usize),
-}
 
 /// Performs the AveragePool2D operation.
 /// Returns a 4-dimensional output tensor containing the result of the operation.
@@ -70,6 +66,7 @@ mod tests {
     use nalgebra::matrix;
 
     use super::*;
+    use crate::tensor::TensorViewPadding;
 
     const INPUT: Tensor4D<i8, 1, 2, 3, 2, 1> = Tensor4D {
         buffer: [matrix![

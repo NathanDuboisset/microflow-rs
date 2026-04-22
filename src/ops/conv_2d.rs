@@ -6,13 +6,8 @@ use simba::scalar::SupersetOf;
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
 use crate::quantize::Quantized;
-use crate::tensor::{Tensor4D, TensorView, TensorViewPadding};
-
-pub struct Conv2DOptions {
-    pub fused_activation: FusedActivation,
-    pub view_padding: TensorViewPadding,
-    pub strides: (usize, usize),
-}
+use crate::tensor::{Tensor4D, TensorView};
+use crate::ops_options::conv_2d::Conv2DOptions;
 
 /// Performs the Conv2D operation.
 /// Returns a 4-dimensional output tensor containing the result of the operation.
@@ -112,6 +107,7 @@ mod tests {
     use nalgebra::matrix;
 
     use crate::tensor::Tensor2D;
+    use crate::tensor::TensorViewPadding;
 
     use super::*;
 

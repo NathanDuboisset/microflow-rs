@@ -5,11 +5,8 @@ use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
 use crate::quantize::Quantized;
 use crate::tensor::Tensor2D;
-
-pub struct FullyConnectedOptions {
-    pub fused_activation: FusedActivation,
-}
-
+use crate::ops_options::fully_connected::FullyConnectedOptions;
+    
 /// Performs the FullyConnected operation.
 /// Returns a 2-dimensional output tensor containing the result of the operation.
 ///

@@ -13,3 +13,5 @@ pub mod buffer;
 pub mod ops;
 pub mod quantize;
 pub mod tensor;
+pub mod streaming_ops;
+pub mod ops_options;
