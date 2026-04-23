@@ -112,12 +112,21 @@ impl<T: TokenQuantized> TokenStreamingConv2D<T> {
         let view_padding = self.view_padding;
         let (strides_0, strides_1) = self.strides;
         let (constants_0, constants_1) = &self.constants;
+        let in_r = self.input.shape[1];
+        let in_c = self.input.shape[2];
+        let in_ch = self.input.shape[3];
+        let f_b = self.filters.shape[0];
+        let f_r = self.filters.shape[1];
+        let f_c = self.filters.shape[2];
+        let f_q = self.filters.scale.len();
 
         let setup_tokens = quote! {
             const #filters_ident: #filters_type = #filters;
-            let mut #op_ident = microflow::streaming_ops::StreamingConv2D::new(
+            let mut #op_ident = microflow::streaming_ops::StreamingConv2D::<
+                #type_tokens, #in_r, #in_c, #in_ch, #f_b, #f_r, #f_c, #f_q
+            >::new(
                 #input_zp,
-                &#filters_ident,
+                #filters_ident,
                 [#(#output_scale),*],
                 [#(#output_zero_point),*],
                 microflow::ops_options::Conv2DOptions {
@@ -220,18 +229,20 @@ mod tests {
             node.setup_tokens.to_string(),
             quote! {
                 const filters_0: microflow::tensor::Tensor4D<i8, 2usize, 2usize, 3usize, 2usize, 2usize> = #filters;
-                let mut stream_op_0 = microflow::streaming_ops::StreamingConv2D::new(
-                    36i8,
-                    &filters_0,
-                    [0.29f32],
-                    [30i8],
-                    microflow::ops_options::Conv2DOptions {
-                        fused_activation: #fused_activation,
-                        view_padding: #view_padding,
-                        strides: (1usize, 1usize),
-                    },
-                    (#constants_0, #constants_1)
-                );
+                let mut stream_op_0 = microflow::streaming_ops::StreamingConv2D::<
+                    i8, 2usize, 3usize, 2usize, 2usize, 2usize, 3usize, 2usize
+                >::new(
+                        36i8,
+                        filters_0,
+                        [0.29f32],
+                        [30i8],
+                        microflow::ops_options::Conv2DOptions {
+                            fused_activation: #fused_activation,
+                            view_padding: #view_padding,
+                            strides: (1usize, 1usize),
+                        },
+                        (#constants_0, #constants_1)
+                    );
             }
             .to_string()
         );

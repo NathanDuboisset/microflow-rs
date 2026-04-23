@@ -1,8 +1,8 @@
-mod stream_op;
-mod stream_pipeline;
+pub mod stream_op;
+pub mod stream_pipeline;
 
-mod conv_2d;
-mod average_pool_2d;
+pub mod conv_2d;
+pub mod average_pool_2d;
 
 pub use stream_op::*;
 pub use stream_pipeline::*;

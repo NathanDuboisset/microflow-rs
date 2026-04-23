@@ -58,6 +58,8 @@ impl StreamPipeline {
         );
 
         tokens.extend(quote! {
+            use microflow::streaming_ops::stream_op::ChainExt;
+
             let input = microflow::streaming_ops::stream_pipeline::<
                 #input_type, #in_r, #in_c, #in_ch, #out_r, #out_c, #out_ch, _
             >(input, #chain_expr);
