@@ -147,7 +147,7 @@ impl<T: TokenQuantized> ToTokens for TokenFullyConnected<T> {
                     &#weights_ident,
                     [#output_scale],
                     [#output_zero_point],
-                    microflow::ops::FullyConnectedOptions {
+                    microflow::ops_options::FullyConnectedOptions {
                         fused_activation: #fused_activation,
                     },
                     (#constants_0, #constants_1, #constants_2, #constants_3)
@@ -239,7 +239,7 @@ mod tests {
                         &weights_0,
                         [0.9f32],
                         [10i8],
-                        microflow::ops::FullyConnectedOptions {
+                        microflow::ops_options::FullyConnectedOptions {
                             fused_activation: #fused_activation,
                         },
                         (#constants_0, 13f32, #constants_2, 16i32)

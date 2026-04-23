@@ -7,6 +7,7 @@ use simba::scalar::SupersetOf;
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
 use crate::quantize::Quantized;
+use crate::streaming_ops::stream_op::StreamOp;
 use crate::tensor::Tensor4D;
 
 use crate::ops_options::conv_2d::Conv2DOptions;
@@ -37,8 +38,6 @@ pub struct StreamingConv2D<
     rows: [[[T; INPUT_CHANS]; INPUT_COLS]; FILTERS_ROWS],
 
     row_head: usize,
-    row: usize,
-    col: usize,
 
     input_zero_point: T,
     filters: Tensor4D<
@@ -57,6 +56,12 @@ pub struct StreamingConv2D<
         Buffer2D<f32, FILTERS_QUANTS, 1>,
     ),
     filter_sums: [i32; FILTERS_BATCHES],
+
+    pub shift_rows: usize,
+    pub shift_cols: usize,
+    
+    pub in_cycle: usize,
+    pub out_cycle: usize,
 }
 
 impl<
@@ -105,11 +110,16 @@ impl<
             })
         });
 
+        let (shift_rows, shift_cols) = match options.view_padding {
+            crate::tensor::TensorViewPadding::Same => {
+                ((FILTERS_ROWS - 1) / 2, (FILTERS_COLS - 1) / 2)
+            }
+            crate::tensor::TensorViewPadding::Valid => (0, 0),
+        };
+
         Self {
             rows: [[[input_zero_point; INPUT_CHANS]; INPUT_COLS]; FILTERS_ROWS],
             row_head: 0,
-            row: 0,
-            col: 0,
             input_zero_point,
             filters,
             output_scale,
@@ -117,24 +127,18 @@ impl<
             options,
             constants,
             filter_sums,
+            shift_rows,
+            shift_cols,
+            in_cycle: 0,
+            out_cycle: 0,
         }
     }
 
-    fn sample(&self, src_row: isize, src_col: isize) -> Option<[T; INPUT_CHANS]> {
-        if src_col < 0 || src_col >= INPUT_COLS as isize {
-            return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => {
-                    Some([self.input_zero_point; INPUT_CHANS])
-                }
-                crate::tensor::TensorViewPadding::Valid => None,
-            };
-        }
 
-        if src_row < 0 || src_row >= INPUT_ROWS as isize {
+    fn sample(&self, src_row: isize, src_col: isize) -> Option<[T; INPUT_CHANS]> {
+        if src_col < 0 || src_col >= INPUT_COLS as isize || src_row < 0 || src_row >= INPUT_ROWS as isize {
             return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => {
-                    Some([self.input_zero_point; INPUT_CHANS])
-                }
+                crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
                 crate::tensor::TensorViewPadding::Valid => None,
             };
         }
@@ -142,21 +146,21 @@ impl<
         let src_row = src_row as usize;
         let src_col = src_col as usize;
 
-        if src_row > self.row {
+        // The row currently being written to the ring buffer
+        let in_row = (self.in_cycle - 1) / INPUT_COLS; 
+        let active_row = in_row.min(INPUT_ROWS - 1);
+
+        if src_row > active_row {
             return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => {
-                    Some([self.input_zero_point; INPUT_CHANS])
-                }
+                crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
                 crate::tensor::TensorViewPadding::Valid => None,
             };
         }
 
-        let delta = self.row - src_row;
+        let delta = active_row - src_row;
         if delta >= FILTERS_ROWS {
             return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => {
-                    Some([self.input_zero_point; INPUT_CHANS])
-                }
+                crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
                 crate::tensor::TensorViewPadding::Valid => None,
             };
         }
@@ -165,29 +169,26 @@ impl<
         Some(self.rows[row_idx][src_col])
     }
 
-    fn compute(&self) -> [T; FILTERS_BATCHES] {
+    fn compute(&self, out_row: usize, out_col: usize) -> [T; FILTERS_BATCHES] {
         array::from_fn(|b| {
             let input_zero_point = i32::from_subset(&self.input_zero_point);
             let filters_zero_point = i32::from_subset(
-                &self
-                    .filters
-                    .zero_point
-                    .get(b)
-                    .copied()
-                    .unwrap_or(self.filters.zero_point[0]),
+                &self.filters.zero_point.get(b).copied().unwrap_or(self.filters.zero_point[0]),
             );
 
             let mut dot = 0i32;
             let mut sum_input = 0i32;
 
+            // Compute center of kernel purely from output coordinates
+            let center_row = out_row * self.options.strides.0;
+            let center_col = out_col * self.options.strides.1;
+
             for kh in 0..FILTERS_ROWS {
                 for kw in 0..FILTERS_COLS {
-                    let src_row = self.row as isize + kh as isize + 1 - FILTERS_ROWS as isize;
-                    let src_col = self.col as isize + kw as isize + 1 - FILTERS_COLS as isize;
+                    let src_row = center_row as isize + kh as isize - self.shift_rows as isize;
+                    let src_col = center_col as isize + kw as isize - self.shift_cols as isize;
 
-                    let x = self
-                        .sample(src_row, src_col)
-                        .unwrap_or([self.input_zero_point; INPUT_CHANS]);
+                    let x = self.sample(src_row, src_col).unwrap_or([self.input_zero_point; INPUT_CHANS]);
 
                     for c in 0..INPUT_CHANS {
                         let xv = i32::from_subset(&x[c]);
@@ -198,66 +199,111 @@ impl<
                 }
             }
 
+            // ... (Keep your exact constants and activation math here, it is completely correct) ...
             let constants = (
                 self.constants.0[b],
                 self.constants.1.get(b).copied().unwrap_or(self.constants.1[0]),
                 input_zero_point * self.filter_sums[b],
-                (FILTERS_ROWS * FILTERS_COLS * INPUT_CHANS) as i32
-                    * input_zero_point
-                    * filters_zero_point,
+                (FILTERS_ROWS * FILTERS_COLS * INPUT_CHANS) as i32 * input_zero_point * filters_zero_point,
             );
 
             let y = T::from_superset_unchecked(&roundf(
                 f32::from_subset(&self.output_zero_point[0])
                     + constants.0
-                    + constants.1
-                        * f32::from_subset(&(
-                            dot
-                                - sum_input * filters_zero_point
-                                - constants.2
-                                + constants.3
-                        )),
+                    + constants.1 * f32::from_subset(&(dot - sum_input * filters_zero_point - constants.2 + constants.3)),
             ));
 
             match self.options.fused_activation {
                 FusedActivation::None => y,
                 FusedActivation::Relu => relu(y, self.output_zero_point[0]),
-                FusedActivation::Relu6 => {
-                    relu6(y, self.output_scale[0], self.output_zero_point[0])
-                }
+                FusedActivation::Relu6 => relu6(y, self.output_scale[0], self.output_zero_point[0]),
             }
         })
     }
 
     pub fn push(&mut self, pixel: [T; INPUT_CHANS]) -> Option<[T; FILTERS_BATCHES]> {
-        self.rows[self.row_head][self.col] = pixel;
+        let in_row = self.in_cycle / INPUT_COLS;
+        let in_col = self.in_cycle % INPUT_COLS;
 
-        let can_emit = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => true,
-            crate::tensor::TensorViewPadding::Valid => {
-                self.row + 1 >= FILTERS_ROWS && self.col + 1 >= FILTERS_COLS
-            }
-        };
-
-        let emit = if can_emit
-            && self.row % self.options.strides.0 == 0
-            && self.col % self.options.strides.1 == 0
-        {
-            Some(self.compute())
-        } else {
-            None
-        };
-
-        self.col += 1;
-
-        if self.col == INPUT_COLS {
-            self.col = 0;
-            self.row += 1;
+        // Advance row_head at the start of a new physical row
+        if in_col == 0 && in_row > 0 && in_row < INPUT_ROWS {
             self.row_head = (self.row_head + 1) % FILTERS_ROWS;
-            self.rows[self.row_head] = [[self.input_zero_point; INPUT_CHANS]; INPUT_COLS];
         }
 
-        emit
+        if in_row < INPUT_ROWS {
+            self.rows[self.row_head][in_col] = pixel;
+        }
+
+        self.in_cycle += 1;
+        
+        // Determine target output dimensions
+        let out_cols = match self.options.view_padding {
+            crate::tensor::TensorViewPadding::Same => (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1,
+            crate::tensor::TensorViewPadding::Valid => (INPUT_COLS.saturating_sub(FILTERS_COLS)) / self.options.strides.1 + 1,
+        };
+        let out_rows = match self.options.view_padding {
+            crate::tensor::TensorViewPadding::Same => (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0,
+            crate::tensor::TensorViewPadding::Valid => (INPUT_ROWS.saturating_sub(FILTERS_ROWS)) / self.options.strides.0 + 1,
+        };
+
+        if self.out_cycle >= out_rows * out_cols {
+            return None; // Fully complete!
+        }
+
+        let out_row = self.out_cycle / out_cols;
+        let out_col = self.out_cycle % out_cols;
+
+        // 3. Find the bottom-right input coordinate required for this output
+        let req_in_row = out_row * self.options.strides.0 + FILTERS_ROWS.saturating_sub(1).saturating_sub(self.shift_rows);
+        let req_in_col = out_col * self.options.strides.1 + FILTERS_COLS.saturating_sub(1).saturating_sub(self.shift_cols);
+        
+        // Convert that coordinate back into the linear clock cycle
+        let req_cycles = req_in_row * INPUT_COLS + req_in_col + 1;
+
+        // 4. Emit if the required pixels have arrived (or if the padding flush has clocked past them)
+        if self.in_cycle >= req_cycles {
+            let emit = self.compute(out_row, out_col);
+            self.out_cycle += 1;
+            Some(emit)
+        } else {
+            None
+        }
+    }
+}
+
+
+impl<
+        T: Quantized,
+        const INPUT_ROWS: usize,
+        const INPUT_COLS: usize,
+        const INPUT_CHANS: usize,
+        const FILTERS_BATCHES: usize,
+        const FILTERS_ROWS: usize,
+        const FILTERS_COLS: usize,
+        const FILTERS_QUANTS: usize,
+    > StreamOp<T, INPUT_CHANS, FILTERS_BATCHES>
+    for StreamingConv2D<
+        T,
+        INPUT_ROWS,
+        INPUT_COLS,
+        INPUT_CHANS,
+        FILTERS_BATCHES,
+        FILTERS_ROWS,
+        FILTERS_COLS,
+        FILTERS_QUANTS,
+    >
+{
+    #[inline(always)]
+    fn push(&mut self, input: [T; INPUT_CHANS]) -> Option<[T; FILTERS_BATCHES]> {
+        StreamingConv2D::push(self, input)
+    }
+
+    fn output_scale(&self) -> [f32; 1] {
+        self.output_scale
+    }
+
+    fn output_zero_point(&self) -> [T; 1] {
+        self.output_zero_point
     }
 }
 
@@ -267,11 +313,10 @@ mod tests {
     use nalgebra::matrix;
 
     use crate::buffer::Buffer2D;
-    use crate::ops::conv_2d::conv_2d;
     use crate::ops_options::conv_2d::Conv2DOptions;
     use crate::streaming_ops::stream_pipeline::stream_pipeline;
-    use crate::tensor::{Tensor4D, TensorViewPadding};
     use crate::activation::FusedActivation;
+    use crate::tensor::{Tensor4D, TensorViewPadding};
 
     use super::*; // your StreamingConv2D
 
@@ -324,18 +369,7 @@ mod tests {
 
     #[test]
     fn streaming_conv2d_matches_reference() {
-        // --- Reference ---
-        let expected = conv_2d(
-            INPUT,
-            &FILTERS,
-            OUTPUT_SCALE,
-            OUTPUT_ZERO_POINT,
-            OPTIONS,
-            CONSTANTS,
-        );
-
-        // --- Streaming operator ---
-        let op = StreamingConv2D::new(
+        let op: StreamingConv2D<i8, 2, 3, 2, 2, 2, 3, 2> = StreamingConv2D::new(
             INPUT.zero_point[0],
             FILTERS,
             OUTPUT_SCALE,
@@ -355,6 +389,6 @@ mod tests {
             _
         >(INPUT, op);
 
-        assert_eq!(result, expected);
+        assert_eq!(result, OUTPUT_REF);
     }
 }

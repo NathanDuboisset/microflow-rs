@@ -101,7 +101,7 @@ impl<T: TokenQuantized> ToTokens for TokenAveragePool2D<T> {
                     (nalgebra::Const::<#filter_shape_0>, nalgebra::Const::<#filter_shape_1>),
                     [#(#output_scale),*],
                     [#(#output_zero_point),*],
-                    microflow::ops::AveragePool2DOptions {
+                    microflow::ops_options::AveragePool2DOptions {
                         fused_activation: #fused_activation,
                         view_padding: #view_padding,
                         strides: (#strides_0, #strides_1),
@@ -162,7 +162,7 @@ mod tests {
                         (nalgebra::Const::<2usize>, nalgebra::Const::<3usize>),
                         [0.1f32],
                         [2i8],
-                        microflow::ops::AveragePool2DOptions {
+                        microflow::ops_options::AveragePool2DOptions {
                             fused_activation: #fused_activation,
                             view_padding: #view_padding,
                             strides: (1usize, 1usize),

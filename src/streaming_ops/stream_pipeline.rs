@@ -21,17 +21,18 @@ pub fn stream_pipeline<
     let mut out_row = 0usize;
     let mut out_col = 0usize;
 
+    let output_zp = op.output_zero_point()[0];
     let mut output = [Buffer2D::from_fn(|_, _| {
-        [input.zero_point[0]; OUTPUT_CHANS]
+        [output_zp; OUTPUT_CHANS]
     })];
 
+    // Push the real data
     for i in 0..INPUT_ROWS {
         for j in 0..INPUT_COLS {
             let pixel = input.buffer[0][(i, j)];
 
             if let Some(y) = op.push(pixel) {
                 output[0][(out_row, out_col)] = y;
-
                 out_col += 1;
                 if out_col == OUTPUT_COLS {
                     out_col = 0;
@@ -41,5 +42,21 @@ pub fn stream_pipeline<
         }
     }
 
-    Tensor4D::new(output, input.scale, input.zero_point)
+
+    // Keep pushing padding pixels until the operator has emitted the entire expected output tensor.
+    let pad_pixel = [input.zero_point[0]; INPUT_CHANS];
+    
+    // We loop until we have filled all required OUTPUT_ROWS.
+    while out_row < OUTPUT_ROWS {
+        if let Some(y) = op.push(pad_pixel) {
+            output[0][(out_row, out_col)] = y;
+            out_col += 1;
+            if out_col == OUTPUT_COLS {
+                out_col = 0;
+                out_row += 1;
+            }
+        }
+    }
+
+    Tensor4D::new(output, op.output_scale(), op.output_zero_point())
 }

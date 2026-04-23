@@ -141,7 +141,7 @@ impl<T: TokenQuantized> ToTokens for TokenDepthwiseConv2D<T> {
                     &#weights_ident,
                     [#(#output_scale),*],
                     [#(#output_zero_point),*],
-                    microflow::ops::DepthwiseConv2DOptions {
+                    microflow::ops_options::DepthwiseConv2DOptions {
                         fused_activation: #fused_activation,
                         view_padding: #view_padding,
                         strides: (#strides_0, #strides_1),
@@ -228,7 +228,7 @@ mod tests {
                         &weights_0,
                         [0.17f32],
                         [18i8],
-                        microflow::ops::DepthwiseConv2DOptions {
+                        microflow::ops_options::DepthwiseConv2DOptions {
                             fused_activation: #fused_activation,
                             view_padding: #view_padding,
                             strides: (1usize, 1usize),

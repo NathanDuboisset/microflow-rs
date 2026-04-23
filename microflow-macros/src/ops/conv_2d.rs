@@ -135,7 +135,7 @@ impl<T: TokenQuantized> ToTokens for TokenConv2D<T> {
                     &#filters_ident,
                     [#(#output_scale),*],
                     [#(#output_zero_point),*],
-                    microflow::ops::Conv2DOptions {
+                    microflow::ops_options::Conv2DOptions {
                         fused_activation: #fused_activation,
                         view_padding: #view_padding,
                         strides: (#strides_0, #strides_1),
@@ -227,7 +227,7 @@ mod tests {
                         &filters_0,
                         [0.29f32],
                         [30i8],
-                        microflow::ops::Conv2DOptions {
+                        microflow::ops_options::Conv2DOptions {
                             fused_activation: #fused_activation,
                             view_padding: #view_padding,
                             strides: (1usize, 1usize),
