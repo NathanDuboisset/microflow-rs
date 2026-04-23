@@ -17,13 +17,15 @@ use syn::{parse_macro_input, ItemStruct};
 use crate::tflite_flatbuffers::tflite::TensorType;
 use ops::*;
 use structmeta::StructMeta;
-use syn::LitStr;
+use syn::{LitStr, LitBool};
+use streaming_ops::pipeline::StreamPipeline;
 use tflite_flatbuffers::tflite::{root_as_model, BuiltinOperator};
 
 mod activation;
 mod buffer;
 mod ops;
 mod quantize;
+mod streaming_ops;
 mod tensor;
 #[path = "../flatbuffers/tflite_generated.rs"]
 #[allow(unused_imports)]
@@ -34,6 +36,7 @@ mod tflite_flatbuffers;
 struct Args {
     #[struct_meta(unnamed)]
     path: LitStr,
+    enable_kernel_streaming: Option<LitBool>,
 }
 
 /// The entry point of MicroFlow.
@@ -46,6 +49,9 @@ struct Args {
 pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as Args);
     let item = parse_macro_input!(item as ItemStruct);
+    let enable_kernel_streaming = args.enable_kernel_streaming
+        .map(|lit| lit.value())
+        .unwrap_or(false);
 
     let buf = fs::read(args.path.value()).unwrap_or_else(|_| {
         abort_call_site!(
@@ -127,14 +133,35 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let operators = subgraph.operators().unwrap();
     let mut layers = TokenStream2::new();
+    let mut stream_pipeline = StreamPipeline::new();
     for (index, operator) in operators.iter().enumerate() {
-        let layer: Box<dyn ToTokens> = match BuiltinOperator(
+        let opcode = BuiltinOperator(
             model
                 .operator_codes()
                 .unwrap()
                 .get(operator.opcode_index() as usize)
                 .deprecated_builtin_code() as i32,
-        ) {
+        );
+
+        if enable_kernel_streaming && streaming_ops::is_streaming_operator(opcode) {
+            let node = match opcode {
+                BuiltinOperator::CONV_2D => {
+                    streaming_ops::conv_2d::parse(operator, tensors, buffers, index)
+                }
+                BuiltinOperator::AVERAGE_POOL_2D => {
+                    streaming_ops::average_pool_2d::parse(operator, tensors, index)
+                }
+                _ => unreachable!("non-streaming opcode reached streaming branch"),
+            };
+            stream_pipeline.push(node);
+            continue;
+        }
+
+        if enable_kernel_streaming {
+            stream_pipeline.flush(&mut layers);
+        }
+
+        let layer: Box<dyn ToTokens> = match opcode {
             BuiltinOperator::FULLY_CONNECTED => {
                 fully_connected::parse(operator, tensors, buffers, index)
             }
@@ -149,6 +176,9 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
             unsupported_op => abort_call_site!("unsupported operator: {:?}", unsupported_op),
         };
         layer.to_tokens(&mut layers)
+    }
+    if enable_kernel_streaming {
+        stream_pipeline.flush(&mut layers);
     }
 
     let output = tensors.get(subgraph.outputs().unwrap().get(0) as usize);
