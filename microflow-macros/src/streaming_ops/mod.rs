@@ -1,5 +1,6 @@
 pub mod average_pool_2d;
 pub mod conv_2d;
+pub mod global_average_pool_2d;
 pub mod pipeline;
 
 use crate::tflite_flatbuffers::tflite::BuiltinOperator;
@@ -22,5 +23,8 @@ pub struct StreamingNode {
 
 /// Returns true when the operator should be compiled through the streaming pipeline.
 pub(crate) fn is_streaming_operator(opcode: BuiltinOperator) -> bool {
-    matches!(opcode, BuiltinOperator::CONV_2D | BuiltinOperator::AVERAGE_POOL_2D)
+    matches!(
+        opcode,
+        BuiltinOperator::CONV_2D | BuiltinOperator::AVERAGE_POOL_2D | BuiltinOperator::MEAN
+    )
 }

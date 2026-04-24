@@ -151,6 +151,9 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
                 BuiltinOperator::AVERAGE_POOL_2D => {
                     streaming_ops::average_pool_2d::parse(operator, tensors, index)
                 }
+                BuiltinOperator::MEAN => {
+                    streaming_ops::global_average_pool_2d::parse(operator, tensors, index)
+                }
                 _ => unreachable!("non-streaming opcode reached streaming branch"),
             };
             stream_pipeline.push(node);
@@ -170,6 +173,7 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
             }
             BuiltinOperator::CONV_2D => conv_2d::parse(operator, tensors, buffers, index),
             BuiltinOperator::AVERAGE_POOL_2D => average_pool_2d::parse(operator, tensors),
+            BuiltinOperator::MEAN => global_average_pool_2d::parse(operator, tensors),
             BuiltinOperator::SOFTMAX => softmax::parse(operator, tensors),
             BuiltinOperator::RESHAPE => Box::new(reshape::parse(operator, tensors)),
             BuiltinOperator::TRANSPOSE => transpose::parse(operator, tensors, buffers),
