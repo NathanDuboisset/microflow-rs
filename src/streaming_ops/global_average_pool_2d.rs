@@ -147,7 +147,7 @@ mod tests {
             1, // OUTPUT_COLS
             2, // OUTPUT_CHANS
             _
-        >(INPUT, op);
+        >(&INPUT, op);
         assert_eq!(result, OUTPUT);
     }
 }

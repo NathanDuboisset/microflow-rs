@@ -62,7 +62,7 @@ impl StreamPipeline {
 
             let input = microflow::streaming_ops::stream_pipeline::<
                 #input_type, #in_r, #in_c, #in_ch, #out_r, #out_c, #out_ch, _
-            >(input, #chain_expr);
+            >(&input, #chain_expr);
         });
 
         self.nodes.clear();

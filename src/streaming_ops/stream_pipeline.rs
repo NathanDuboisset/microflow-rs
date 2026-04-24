@@ -15,7 +15,7 @@ pub fn stream_pipeline<
     const OUTPUT_CHANS: usize,
     OP: StreamOp<T, INPUT_CHANS, OUTPUT_CHANS>,
 >(
-    input: Tensor4D<T, 1, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, 1>,
+    input: &Tensor4D<T, 1, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, 1>,
     mut op: OP,
 ) -> Tensor4D<T, 1, OUTPUT_ROWS, OUTPUT_COLS, OUTPUT_CHANS, 1> {
     let mut out_row = 0usize;
