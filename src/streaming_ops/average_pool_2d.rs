@@ -15,14 +15,15 @@ pub struct StreamingAveragePool2D<
     const INPUT_CHANS: usize,
     const FILTER_ROWS: usize,
     const FILTER_COLS: usize,
+    const BUF_SIZE: usize,
 > {
     pub input_zero_point: T,
     pub output_scale: [f32; 1],
     pub output_zero_point: [T; 1],
     pub options: AveragePool2DOptions,
     pub constants: (f32, f32),
-    pub row_head: usize,
-    pub rows: [[[T; INPUT_CHANS]; INPUT_COLS]; FILTER_ROWS],
+    pub buffer: [[T; INPUT_CHANS]; BUF_SIZE],
+    pub write_idx: usize,
     
     // Precomputed offsets
     pub shift_rows: usize,
@@ -40,7 +41,8 @@ impl<
     const INPUT_CHANS: usize,
     const FILTER_ROWS: usize,
     const FILTER_COLS: usize,
-> StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS> {
+    const BUF_SIZE: usize,
+> StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS, BUF_SIZE> {
     pub fn new(
         input_zero_point: T,
         output_scale: [f32; 1],
@@ -61,8 +63,8 @@ impl<
             output_zero_point,
             options,
             constants,
-            row_head: 0,
-            rows: [[[input_zero_point; INPUT_CHANS]; INPUT_COLS]; FILTER_ROWS],
+            buffer: [[input_zero_point; INPUT_CHANS]; BUF_SIZE],
+            write_idx: 0,
             shift_rows,
             shift_cols,
             in_cycle: 0,
@@ -75,23 +77,24 @@ impl<
             return None; // Out of bounds pixels are simply ignored in AveragePool
         }
 
-        let src_row = src_row as usize;
-        let src_col = src_col as usize;
+        let target_cycle = (src_row as usize) * INPUT_COLS + (src_col as usize);
+        let total_input_cycles = INPUT_ROWS.saturating_mul(INPUT_COLS);
+        let current_cycle = self
+            .in_cycle
+            .saturating_sub(1)
+            .min(total_input_cycles.saturating_sub(1));
 
-        let in_row = (self.in_cycle.saturating_sub(1)) / INPUT_COLS; 
-        let active_row = in_row.min(INPUT_ROWS - 1);
-
-        if src_row > active_row {
+        if target_cycle > current_cycle {
             return None;
         }
 
-        let delta = active_row - src_row;
-        if delta >= FILTER_ROWS {
-            return None;
+        let age = current_cycle - target_cycle;
+        if age < BUF_SIZE {
+            let idx = (self.write_idx + BUF_SIZE - 1 - age) % BUF_SIZE;
+            Some(self.buffer[idx])
+        } else {
+            None
         }
-
-        let row_idx = (self.row_head + FILTER_ROWS - delta) % FILTER_ROWS;
-        Some(self.rows[row_idx][src_col])
     }
 
     fn compute(&self, out_row: usize, out_col: usize) -> [T; INPUT_CHANS] {
@@ -141,22 +144,18 @@ impl<
         const INPUT_CHANS: usize,
         const FILTER_ROWS: usize,
         const FILTER_COLS: usize,
+        const BUF_SIZE: usize,
     > StreamOp<T, INPUT_CHANS, INPUT_CHANS>
-    for StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS>
+    for StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS, BUF_SIZE>
 {
     #[inline(always)]
     fn push(&mut self, pixel: [T; INPUT_CHANS]) -> Option<[T; INPUT_CHANS]> {
         let in_row = self.in_cycle / INPUT_COLS;
-        let in_col = self.in_cycle % INPUT_COLS;
 
-        // 1. Advance ring buffer on new row (preserving data for right-edge math)
-        if in_col == 0 && in_row > 0 && in_row < INPUT_ROWS {
-            self.row_head = (self.row_head + 1) % FILTER_ROWS;
-        }
-
-        // 2. Write pixel
-        if in_row < INPUT_ROWS {
-            self.rows[self.row_head][in_col] = pixel;
+        // 1. Write pixel
+        if in_row < INPUT_ROWS && BUF_SIZE > 0 {
+            self.buffer[self.write_idx] = pixel;
+            self.write_idx = (self.write_idx + 1) % BUF_SIZE;
         }
 
         self.in_cycle += 1;
@@ -242,7 +241,7 @@ mod tests {
 
     #[test]
     fn average_pool_2d_layer() {
-        let op: StreamingAveragePool2D<i8, 2, 3, 2, 2, 3> = StreamingAveragePool2D::new(
+        let op: StreamingAveragePool2D<i8, 2, 3, 2, 2, 3, 6> = StreamingAveragePool2D::new(
             INPUT.zero_point[0],
             OUTPUT_SCALE,
             OUTPUT_ZERO_POINT,

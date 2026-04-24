@@ -34,10 +34,10 @@ pub struct StreamingConv2D<
     const FILTERS_ROWS: usize,
     const FILTERS_COLS: usize,
     const FILTERS_QUANTS: usize,
+    const BUF_SIZE: usize,
 > {
-    rows: [[[T; INPUT_CHANS]; INPUT_COLS]; FILTERS_ROWS],
-
-    row_head: usize,
+    pub buffer: [[T; INPUT_CHANS]; BUF_SIZE],
+    pub write_idx: usize,
 
     input_zero_point: T,
     filters: Tensor4D<
@@ -73,6 +73,7 @@ impl<
         const FILTERS_ROWS: usize,
         const FILTERS_COLS: usize,
         const FILTERS_QUANTS: usize,
+        const BUF_SIZE: usize,
     > StreamingConv2D<
         T,
         INPUT_ROWS,
@@ -82,6 +83,7 @@ impl<
         FILTERS_ROWS,
         FILTERS_COLS,
         FILTERS_QUANTS,
+        BUF_SIZE,
     >
 {
     pub fn new(
@@ -118,8 +120,8 @@ impl<
         };
 
         Self {
-            rows: [[[input_zero_point; INPUT_CHANS]; INPUT_COLS]; FILTERS_ROWS],
-            row_head: 0,
+            buffer: [[input_zero_point; INPUT_CHANS]; BUF_SIZE],
+            write_idx: 0,
             input_zero_point,
             filters,
             output_scale,
@@ -143,30 +145,27 @@ impl<
             };
         }
 
-        let src_row = src_row as usize;
-        let src_col = src_col as usize;
+        let target_cycle = (src_row as usize) * INPUT_COLS + (src_col as usize);
+        let total_input_cycles = INPUT_ROWS.saturating_mul(INPUT_COLS);
+        let current_cycle = self
+            .in_cycle
+            .saturating_sub(1)
+            .min(total_input_cycles.saturating_sub(1));
 
-        // The row currently being written to the ring buffer
-        let in_row = (self.in_cycle - 1) / INPUT_COLS; 
-        let active_row = in_row.min(INPUT_ROWS - 1);
-
-        if src_row > active_row {
+        if target_cycle > current_cycle {
             return match self.options.view_padding {
                 crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
                 crate::tensor::TensorViewPadding::Valid => None,
             };
         }
 
-        let delta = active_row - src_row;
-        if delta >= FILTERS_ROWS {
-            return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
-                crate::tensor::TensorViewPadding::Valid => None,
-            };
+        let age = current_cycle - target_cycle;
+        if age < BUF_SIZE {
+            let idx = (self.write_idx + BUF_SIZE - 1 - age) % BUF_SIZE;
+            Some(self.buffer[idx])
+        } else {
+            Some([self.input_zero_point; INPUT_CHANS])
         }
-
-        let row_idx = (self.row_head + FILTERS_ROWS - delta) % FILTERS_ROWS;
-        Some(self.rows[row_idx][src_col])
     }
 
     fn compute(&self, out_row: usize, out_col: usize) -> [T; FILTERS_BATCHES] {
@@ -223,15 +222,9 @@ impl<
 
     pub fn push(&mut self, pixel: [T; INPUT_CHANS]) -> Option<[T; FILTERS_BATCHES]> {
         let in_row = self.in_cycle / INPUT_COLS;
-        let in_col = self.in_cycle % INPUT_COLS;
-
-        // Advance row_head at the start of a new physical row
-        if in_col == 0 && in_row > 0 && in_row < INPUT_ROWS {
-            self.row_head = (self.row_head + 1) % FILTERS_ROWS;
-        }
-
-        if in_row < INPUT_ROWS {
-            self.rows[self.row_head][in_col] = pixel;
+        if in_row < INPUT_ROWS && BUF_SIZE > 0 {
+            self.buffer[self.write_idx] = pixel;
+            self.write_idx = (self.write_idx + 1) % BUF_SIZE;
         }
 
         self.in_cycle += 1;
@@ -281,6 +274,7 @@ impl<
         const FILTERS_ROWS: usize,
         const FILTERS_COLS: usize,
         const FILTERS_QUANTS: usize,
+        const BUF_SIZE: usize,
     > StreamOp<T, INPUT_CHANS, FILTERS_BATCHES>
     for StreamingConv2D<
         T,
@@ -291,6 +285,7 @@ impl<
         FILTERS_ROWS,
         FILTERS_COLS,
         FILTERS_QUANTS,
+        BUF_SIZE,
     >
 {
     #[inline(always)]
@@ -369,7 +364,7 @@ mod tests {
 
     #[test]
     fn streaming_conv2d_matches_reference() {
-        let op: StreamingConv2D<i8, 2, 3, 2, 2, 2, 3, 2> = StreamingConv2D::new(
+        let op: StreamingConv2D<i8, 2, 3, 2, 2, 2, 3, 2, 6> = StreamingConv2D::new(
             INPUT.zero_point[0],
             FILTERS,
             OUTPUT_SCALE,

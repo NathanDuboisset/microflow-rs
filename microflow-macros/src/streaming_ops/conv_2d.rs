@@ -119,11 +119,12 @@ impl<T: TokenQuantized> TokenStreamingConv2D<T> {
         let f_r = self.filters.shape[1];
         let f_c = self.filters.shape[2];
         let f_q = self.filters.scale.len();
+        let buf_size = if f_r == 0 { 0usize } else { (f_r - 1) * in_c + f_c };
 
         let setup_tokens = quote! {
             const #filters_ident: #filters_type = #filters;
             let mut #op_ident = microflow::streaming_ops::StreamingConv2D::<
-                #type_tokens, #in_r, #in_c, #in_ch, #f_b, #f_r, #f_c, #f_q
+                #type_tokens, #in_r, #in_c, #in_ch, #f_b, #f_r, #f_c, #f_q, #buf_size
             >::new(
                 #input_zp,
                 #filters_ident,
@@ -230,7 +231,7 @@ mod tests {
             quote! {
                 const filters_0: microflow::tensor::Tensor4D<i8, 2usize, 2usize, 3usize, 2usize, 2usize> = #filters;
                 let mut stream_op_0 = microflow::streaming_ops::StreamingConv2D::<
-                    i8, 2usize, 3usize, 2usize, 2usize, 2usize, 3usize, 2usize
+                    i8, 2usize, 3usize, 2usize, 2usize, 2usize, 3usize, 2usize, 6usize
                 >::new(
                         36i8,
                         filters_0,

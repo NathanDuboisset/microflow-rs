@@ -93,11 +93,12 @@ impl<T: TokenQuantized> TokenStreamingAveragePool2D<T> {
         let in_ch = self.input.shape[3];
         let f_r = self.filter_shape.0;
         let f_c = self.filter_shape.1;
+        let buf_size = if f_r == 0 { 0usize } else { (f_r - 1) * in_c + f_c };
         let (constants_0, constants_1) = self.constants;
 
         let setup_tokens = quote! {
             let mut #op_ident = microflow::streaming_ops::StreamingAveragePool2D::<
-                #type_tokens, #in_r, #in_c, #in_ch, #f_r, #f_c
+                #type_tokens, #in_r, #in_c, #in_ch, #f_r, #f_c, #buf_size
             >::new(
                     #input_zp,
                     [#(#output_scale),*],
@@ -172,7 +173,7 @@ mod tests {
             node.setup_tokens.to_string(),
             quote! {
                 let mut stream_op_0 = microflow::streaming_ops::StreamingAveragePool2D::<
-                    i8, 2usize, 3usize, 2usize, 2usize, 3usize
+                    i8, 2usize, 3usize, 2usize, 2usize, 3usize, 6usize
                 >::new(
                         6i8,
                         [0.1f32],
