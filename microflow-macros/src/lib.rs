@@ -74,6 +74,7 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     if input_shape.len() == 1 {
         input_shape.insert(0, 1);
     }
+    let input_rank = input_shape.len();
     let input_type = match input.type_() {
         TensorType::INT8 => quote!(i8),
         TensorType::UINT8 => quote!(u8),
@@ -220,6 +221,14 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let ts = quote! {
         #item
         impl #ident {
+            pub const fn expose_input() -> ([f32; 1], [#input_type; 1], [usize; #input_rank]) {
+                (
+                    [#(#input_scale),*],
+                    [#(#input_zero_point),*],
+                    [#(#input_shape),*],
+                )
+            }
+
             pub fn predict(input: microflow::buffer::#input_buffer<f32, #(#input_shape),*>) -> microflow::buffer::#output_buffer<f32, #(#output_shape),*> {
                 let input = microflow::tensor::#input_tensor::quantize(input, [#(#input_scale),*], [#(#input_zero_point),*]);
                 Self::predict_inner(input).dequantize()
