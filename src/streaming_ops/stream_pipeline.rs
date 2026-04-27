@@ -48,6 +48,9 @@ pub fn stream_pipeline<
     
     // We loop until we have filled all required OUTPUT_ROWS.
     while out_row < OUTPUT_ROWS {
+        if op.is_finished() {
+            break;
+        }
         if let Some(y) = op.push(pad_pixel) {
             output[0][(out_row, out_col)] = y;
             out_col += 1;

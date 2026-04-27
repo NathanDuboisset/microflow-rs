@@ -289,6 +289,27 @@ impl<
     >
 {
     #[inline(always)]
+    fn is_finished(&self) -> bool {
+        let out_cols = match self.options.view_padding {
+            crate::tensor::TensorViewPadding::Same => {
+                (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1
+            }
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_COLS.saturating_sub(FILTERS_COLS)) / self.options.strides.1 + 1
+            }
+        };
+        let out_rows = match self.options.view_padding {
+            crate::tensor::TensorViewPadding::Same => {
+                (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0
+            }
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_ROWS.saturating_sub(FILTERS_ROWS)) / self.options.strides.0 + 1
+            }
+        };
+        self.out_cycle >= out_rows * out_cols
+    }
+
+    #[inline(always)]
     fn push(&mut self, input: [T; INPUT_CHANS]) -> Option<[T; FILTERS_BATCHES]> {
         StreamingConv2D::push(self, input)
     }

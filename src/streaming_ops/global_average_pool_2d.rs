@@ -72,6 +72,11 @@ impl<
     for StreamingGlobalAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS>
 {
     #[inline(always)]
+    fn is_finished(&self) -> bool {
+        self.out_cycle >= 1
+    }
+
+    #[inline(always)]
     fn push(&mut self, pixel: [T; INPUT_CHANS]) -> Option<[T; INPUT_CHANS]> {
         let input_len = INPUT_ROWS * INPUT_COLS;
 

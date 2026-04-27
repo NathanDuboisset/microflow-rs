@@ -2,6 +2,7 @@ use crate::quantize::Quantized;
 
 pub trait StreamOp<T: Quantized, const IN: usize, const OUT: usize> {
     fn push(&mut self, input: [T; IN]) -> Option<[T; OUT]>;
+    fn is_finished(&self) -> bool;
     
     // NEW: Expose the output metadata so the pipeline can read it
     fn output_scale(&self) -> [f32; 1];
@@ -18,6 +19,11 @@ impl<T: Quantized, const C: usize> StreamOp<T, C, C> for Identity<T> {
     #[inline(always)]
     fn push(&mut self, input: [T; C]) -> Option<[T; C]> {
         Some(input)
+    }
+
+    #[inline(always)]
+    fn is_finished(&self) -> bool {
+        true
     }
 
     fn output_scale(&self) -> [f32; 1] {
@@ -44,11 +50,23 @@ where
 {
     #[inline(always)]
     fn push(&mut self, input: [T; IN]) -> Option<[T; OUT]> {
-        if let Some(mid) = self.a.push(input) {
-            self.b.push(mid)
-        } else {
-            None
+        match self.a.push(input) {
+            Some(mid) => self.b.push(mid),
+            None => {
+                if self.a.is_finished() {
+                    let zp = self.a.output_zero_point()[0];
+                    let pad = core::array::from_fn(|_| zp);
+                    self.b.push(pad)
+                } else {
+                    None
+                }
+            }
         }
+    }
+
+    #[inline(always)]
+    fn is_finished(&self) -> bool {
+        self.a.is_finished() && self.b.is_finished()
     }
 
     // The final metadata of a chained pipeline is dictated by the very last operator

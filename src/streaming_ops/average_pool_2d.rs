@@ -149,6 +149,27 @@ impl<
     for StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS, BUF_SIZE>
 {
     #[inline(always)]
+    fn is_finished(&self) -> bool {
+        let out_cols = match self.options.view_padding {
+            crate::tensor::TensorViewPadding::Same => {
+                (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1
+            }
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_COLS.saturating_sub(FILTER_COLS)) / self.options.strides.1 + 1
+            }
+        };
+        let out_rows = match self.options.view_padding {
+            crate::tensor::TensorViewPadding::Same => {
+                (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0
+            }
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_ROWS.saturating_sub(FILTER_ROWS)) / self.options.strides.0 + 1
+            }
+        };
+        self.out_cycle >= out_rows * out_cols
+    }
+
+    #[inline(always)]
     fn push(&mut self, pixel: [T; INPUT_CHANS]) -> Option<[T; INPUT_CHANS]> {
         let in_row = self.in_cycle / INPUT_COLS;
 
