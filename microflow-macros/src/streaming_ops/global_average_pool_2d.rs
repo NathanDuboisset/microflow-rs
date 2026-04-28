@@ -24,14 +24,10 @@ pub(crate) fn parse(
     let inputs = operator.inputs().unwrap();
     let input_type = tensors.get(inputs.get(0) as usize).type_();
     match input_type {
-        TensorType::INT8 => {
-            TokenStreamingGlobalAveragePool2D::<i8>::new(operator, tensors, index)
-                .to_streaming_node(quote! { i8 })
-        }
-        TensorType::UINT8 => {
-            TokenStreamingGlobalAveragePool2D::<u8>::new(operator, tensors, index)
-                .to_streaming_node(quote! { u8 })
-        }
+        TensorType::INT8 => TokenStreamingGlobalAveragePool2D::<i8>::new(operator, tensors, index)
+            .to_streaming_node(quote! { i8 }),
+        TensorType::UINT8 => TokenStreamingGlobalAveragePool2D::<u8>::new(operator, tensors, index)
+            .to_streaming_node(quote! { u8 }),
         input_type => abort_call_site!(
             "StreamingGlobalAveragePool2D supports only INT8/UINT8 input tensors, got {:?}",
             input_type
@@ -129,8 +125,7 @@ mod tests {
     #[test]
     fn streaming_global_average_pool_2d_preprocess() {
         let layer = setup();
-        let constants =
-            TokenStreamingGlobalAveragePool2D::preprocess(&layer.input, &layer.output);
+        let constants = TokenStreamingGlobalAveragePool2D::preprocess(&layer.input, &layer.output);
         assert_eq!(constants.0, 5.);
         assert_eq!(constants.1, -28.);
     }

@@ -37,7 +37,9 @@ impl TokenTranspose {
         tensors: Vector<ForwardsUOffset<Tensor>>,
         buffers: Vector<ForwardsUOffset<Buffer>>,
     ) -> Self {
-        let inputs = operator.inputs().unwrap_or_else(|| abort_call_site!("transpose: no inputs"));
+        let inputs = operator
+            .inputs()
+            .unwrap_or_else(|| abort_call_site!("transpose: no inputs"));
         if inputs.len() < 2 {
             abort_call_site!("transpose requires two inputs (data, perm)");
         }
@@ -64,10 +66,7 @@ impl TokenTranspose {
             abort_call_site!("transpose perm length must match tensor rank");
         }
 
-        Self {
-            perm,
-            output_shape,
-        }
+        Self { perm, output_shape }
     }
 }
 

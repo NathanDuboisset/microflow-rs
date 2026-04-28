@@ -3,7 +3,7 @@ use crate::quantize::Quantized;
 pub trait StreamOp<T: Quantized, const IN: usize, const OUT: usize> {
     fn push(&mut self, input: [T; IN]) -> Option<[T; OUT]>;
     fn is_finished(&self) -> bool;
-    
+
     // NEW: Expose the output metadata so the pipeline can read it
     fn output_scale(&self) -> [f32; 1];
     fn output_zero_point(&self) -> [T; 1];
@@ -41,8 +41,8 @@ pub struct Chain<const MID: usize, A, B> {
     pub b: B,
 }
 
-impl<T, const IN: usize, const MID: usize, const OUT: usize, A, B>
-    StreamOp<T, IN, OUT> for Chain<MID, A, B>
+impl<T, const IN: usize, const MID: usize, const OUT: usize, A, B> StreamOp<T, IN, OUT>
+    for Chain<MID, A, B>
 where
     T: Quantized,
     A: StreamOp<T, IN, MID>,

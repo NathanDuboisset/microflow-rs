@@ -28,14 +28,10 @@ pub(crate) fn parse(
     let inputs = operator.inputs().unwrap();
     let input_type = tensors.get(inputs.get(0) as usize).type_();
     match input_type {
-        TensorType::INT8 => {
-            TokenStreamingAveragePool2D::<i8>::new(operator, tensors, index)
-                .to_streaming_node(quote! { i8 })
-        }
-        TensorType::UINT8 => {
-            TokenStreamingAveragePool2D::<u8>::new(operator, tensors, index)
-                .to_streaming_node(quote! { u8 })
-        }
+        TensorType::INT8 => TokenStreamingAveragePool2D::<i8>::new(operator, tensors, index)
+            .to_streaming_node(quote! { i8 }),
+        TensorType::UINT8 => TokenStreamingAveragePool2D::<u8>::new(operator, tensors, index)
+            .to_streaming_node(quote! { u8 }),
         input_type => abort_call_site!(
             "StreamingAveragePool2D supports only INT8/UINT8 input tensors, got {:?}",
             input_type
@@ -93,7 +89,11 @@ impl<T: TokenQuantized> TokenStreamingAveragePool2D<T> {
         let in_ch = self.input.shape[3];
         let f_r = self.filter_shape.0;
         let f_c = self.filter_shape.1;
-        let buf_size = if f_r == 0 { 0usize } else { (f_r - 1) * in_c + f_c };
+        let buf_size = if f_r == 0 {
+            0usize
+        } else {
+            (f_r - 1) * in_c + f_c
+        };
         let (constants_0, constants_1) = self.constants;
 
         let setup_tokens = quote! {

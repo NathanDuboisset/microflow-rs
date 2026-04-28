@@ -22,9 +22,7 @@ pub fn stream_pipeline<
     let mut out_col = 0usize;
 
     let output_zp = op.output_zero_point()[0];
-    let mut output = [Buffer2D::from_fn(|_, _| {
-        [output_zp; OUTPUT_CHANS]
-    })];
+    let mut output = [Buffer2D::from_fn(|_, _| [output_zp; OUTPUT_CHANS])];
 
     // Push the real data
     for i in 0..INPUT_ROWS {
@@ -42,10 +40,9 @@ pub fn stream_pipeline<
         }
     }
 
-
     // Keep pushing padding pixels until the operator has emitted the entire expected output tensor.
     let pad_pixel = [input.zero_point[0]; INPUT_CHANS];
-    
+
     // We loop until we have filled all required OUTPUT_ROWS.
     while out_row < OUTPUT_ROWS {
         if op.is_finished() {

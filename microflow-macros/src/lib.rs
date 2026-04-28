@@ -16,9 +16,9 @@ use syn::{parse_macro_input, ItemStruct};
 
 use crate::tflite_flatbuffers::tflite::TensorType;
 use ops::*;
-use structmeta::StructMeta;
-use syn::{LitStr, LitBool};
 use streaming_ops::pipeline::StreamPipeline;
+use structmeta::StructMeta;
+use syn::{LitBool, LitStr};
 use tflite_flatbuffers::tflite::{root_as_model, BuiltinOperator};
 
 mod activation;
@@ -49,7 +49,8 @@ struct Args {
 pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as Args);
     let item = parse_macro_input!(item as ItemStruct);
-    let enable_kernel_streaming = args.enable_kernel_streaming
+    let enable_kernel_streaming = args
+        .enable_kernel_streaming
         .map(|lit| lit.value())
         .unwrap_or(false);
 

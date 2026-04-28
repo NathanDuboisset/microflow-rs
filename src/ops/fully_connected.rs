@@ -3,10 +3,10 @@ use simba::scalar::SupersetOf;
 
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
+use crate::ops_options::fully_connected::FullyConnectedOptions;
 use crate::quantize::Quantized;
 use crate::tensor::Tensor2D;
-use crate::ops_options::fully_connected::FullyConnectedOptions;
-    
+
 /// Performs the FullyConnected operation.
 /// Returns a 2-dimensional output tensor containing the result of the operation.
 ///

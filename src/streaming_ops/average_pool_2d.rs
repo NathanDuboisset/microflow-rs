@@ -4,8 +4,8 @@ use libm::roundf;
 use simba::scalar::SupersetOf;
 
 use crate::activation::{relu, relu6, FusedActivation};
-use crate::quantize::Quantized;
 use crate::ops_options::average_pool_2d::AveragePool2DOptions;
+use crate::quantize::Quantized;
 use crate::streaming_ops::stream_op::StreamOp;
 
 pub struct StreamingAveragePool2D<
@@ -24,25 +24,35 @@ pub struct StreamingAveragePool2D<
     pub constants: (f32, f32),
     pub buffer: [[T; INPUT_CHANS]; BUF_SIZE],
     pub write_idx: usize,
-    
+
     // Precomputed offsets
     pub shift_rows: usize,
     pub shift_cols: usize,
-    
+
     // Decoupled hardware clocks
     pub in_cycle: usize,
     pub out_cycle: usize,
 }
 
 impl<
-    T: Quantized,
-    const INPUT_ROWS: usize,
-    const INPUT_COLS: usize,
-    const INPUT_CHANS: usize,
-    const FILTER_ROWS: usize,
-    const FILTER_COLS: usize,
-    const BUF_SIZE: usize,
-> StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS, BUF_SIZE> {
+        T: Quantized,
+        const INPUT_ROWS: usize,
+        const INPUT_COLS: usize,
+        const INPUT_CHANS: usize,
+        const FILTER_ROWS: usize,
+        const FILTER_COLS: usize,
+        const BUF_SIZE: usize,
+    >
+    StreamingAveragePool2D<
+        T,
+        INPUT_ROWS,
+        INPUT_COLS,
+        INPUT_CHANS,
+        FILTER_ROWS,
+        FILTER_COLS,
+        BUF_SIZE,
+    >
+{
     pub fn new(
         input_zero_point: T,
         output_scale: [f32; 1],
@@ -73,7 +83,11 @@ impl<
     }
 
     fn sample(&self, src_row: isize, src_col: isize) -> Option<[T; INPUT_CHANS]> {
-        if src_col < 0 || src_col >= INPUT_COLS as isize || src_row < 0 || src_row >= INPUT_ROWS as isize {
+        if src_col < 0
+            || src_col >= INPUT_COLS as isize
+            || src_row < 0
+            || src_row >= INPUT_ROWS as isize
+        {
             return None; // Out of bounds pixels are simply ignored in AveragePool
         }
 
@@ -111,9 +125,15 @@ impl<
                 let src_col = center_col as isize + kw as isize - self.shift_cols as isize;
 
                 // TFLite Only averages over valid pixels!
-                if src_row >= 0 && src_row < INPUT_ROWS as isize && src_col >= 0 && src_col < INPUT_COLS as isize {
+                if src_row >= 0
+                    && src_row < INPUT_ROWS as isize
+                    && src_col >= 0
+                    && src_col < INPUT_COLS as isize
+                {
                     valid_count += 1;
-                    let x = self.sample(src_row, src_col).unwrap_or([self.input_zero_point; INPUT_CHANS]);
+                    let x = self
+                        .sample(src_row, src_col)
+                        .unwrap_or([self.input_zero_point; INPUT_CHANS]);
                     for c in 0..INPUT_CHANS {
                         sums[c] += i32::from_subset(&x[c]);
                     }
@@ -146,22 +166,26 @@ impl<
         const FILTER_COLS: usize,
         const BUF_SIZE: usize,
     > StreamOp<T, INPUT_CHANS, INPUT_CHANS>
-    for StreamingAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS, FILTER_ROWS, FILTER_COLS, BUF_SIZE>
+    for StreamingAveragePool2D<
+        T,
+        INPUT_ROWS,
+        INPUT_COLS,
+        INPUT_CHANS,
+        FILTER_ROWS,
+        FILTER_COLS,
+        BUF_SIZE,
+    >
 {
     #[inline(always)]
     fn is_finished(&self) -> bool {
         let out_cols = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => {
-                (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1
-            }
+            crate::tensor::TensorViewPadding::Same => INPUT_COLS.div_ceil(self.options.strides.1),
             crate::tensor::TensorViewPadding::Valid => {
                 (INPUT_COLS.saturating_sub(FILTER_COLS)) / self.options.strides.1 + 1
             }
         };
         let out_rows = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => {
-                (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0
-            }
+            crate::tensor::TensorViewPadding::Same => INPUT_ROWS.div_ceil(self.options.strides.0),
             crate::tensor::TensorViewPadding::Valid => {
                 (INPUT_ROWS.saturating_sub(FILTER_ROWS)) / self.options.strides.0 + 1
             }
@@ -183,24 +207,34 @@ impl<
 
         // 3. Determine Output Dimension Targets
         let out_cols = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1,
-            crate::tensor::TensorViewPadding::Valid => (INPUT_COLS.saturating_sub(FILTER_COLS)) / self.options.strides.1 + 1,
+            crate::tensor::TensorViewPadding::Same => INPUT_COLS.div_ceil(self.options.strides.1),
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_COLS.saturating_sub(FILTER_COLS)) / self.options.strides.1 + 1
+            }
         };
         let out_rows = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0,
-            crate::tensor::TensorViewPadding::Valid => (INPUT_ROWS.saturating_sub(FILTER_ROWS)) / self.options.strides.0 + 1,
+            crate::tensor::TensorViewPadding::Same => INPUT_ROWS.div_ceil(self.options.strides.0),
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_ROWS.saturating_sub(FILTER_ROWS)) / self.options.strides.0 + 1
+            }
         };
 
         if self.out_cycle >= out_rows * out_cols {
-            return None; 
+            return None;
         }
 
         let out_row = self.out_cycle / out_cols;
         let out_col = self.out_cycle % out_cols;
 
         // 4. Calculate required clock cycle for this output
-        let req_in_row = out_row * self.options.strides.0 + FILTER_ROWS.saturating_sub(1).saturating_sub(self.shift_rows);
-        let req_in_col = out_col * self.options.strides.1 + FILTER_COLS.saturating_sub(1).saturating_sub(self.shift_cols);
+        let req_in_row = out_row * self.options.strides.0
+            + FILTER_ROWS
+                .saturating_sub(1)
+                .saturating_sub(self.shift_rows);
+        let req_in_col = out_col * self.options.strides.1
+            + FILTER_COLS
+                .saturating_sub(1)
+                .saturating_sub(self.shift_cols);
         let req_cycles = req_in_row * INPUT_COLS + req_in_col + 1;
 
         // 5. Emit
@@ -224,16 +258,14 @@ impl<
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use nalgebra::matrix;
 
     use super::*;
-    use crate::tensor::TensorViewPadding;
     use crate::streaming_ops::stream_pipeline::stream_pipeline;
     use crate::tensor::Tensor4D;
+    use crate::tensor::TensorViewPadding;
 
     const INPUT: Tensor4D<i8, 1, 2, 3, 2, 1> = Tensor4D {
         buffer: [matrix![
@@ -277,7 +309,7 @@ mod tests {
             2, // OUTPUT_ROWS
             3, // OUTPUT_COLS
             2, // OUTPUT_CHANS
-            _
+            _,
         >(&INPUT, op);
         assert_eq!(result, OUTPUT);
     }

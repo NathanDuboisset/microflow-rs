@@ -5,9 +5,9 @@ use simba::scalar::SupersetOf;
 
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
+use crate::ops_options::depthwise_conv_2d::DepthwiseConv2DOptions;
 use crate::quantize::Quantized;
 use crate::tensor::{Tensor4D, TensorView};
-use crate::ops_options::depthwise_conv_2d::DepthwiseConv2DOptions;
 
 /// Performs the DepthwiseConv2D operation.
 /// Returns a 4-dimensional output tensor containing the result of the operation.

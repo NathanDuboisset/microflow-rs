@@ -6,10 +6,9 @@ use simba::scalar::SupersetOf;
 
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
+use crate::ops_options::average_pool_2d::AveragePool2DOptions;
 use crate::quantize::Quantized;
 use crate::tensor::{Tensor4D, TensorView};
-use crate::ops_options::average_pool_2d::AveragePool2DOptions;
-
 
 /// Performs the AveragePool2D operation.
 /// Returns a 4-dimensional output tensor containing the result of the operation.

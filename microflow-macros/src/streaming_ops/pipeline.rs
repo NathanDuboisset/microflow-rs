@@ -36,14 +36,8 @@ impl StreamPipeline {
             chain_expr = quote! { #chain_expr.then(#op_ident) };
         }
 
-        let first_node = self
-            .nodes
-            .first()
-            .expect("streaming pipeline is non-empty");
-        let last_node = self
-            .nodes
-            .last()
-            .expect("streaming pipeline is non-empty");
+        let first_node = self.nodes.first().expect("streaming pipeline is non-empty");
+        let last_node = self.nodes.last().expect("streaming pipeline is non-empty");
 
         let input_type = &first_node.input_type;
         let (in_r, in_c, in_ch) = (

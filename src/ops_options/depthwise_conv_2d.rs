@@ -1,5 +1,5 @@
-use crate::activation::{FusedActivation};
-use crate::tensor::{TensorViewPadding};
+use crate::activation::FusedActivation;
+use crate::tensor::TensorViewPadding;
 
 pub struct DepthwiseConv2DOptions {
     pub fused_activation: FusedActivation,

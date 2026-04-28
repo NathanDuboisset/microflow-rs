@@ -58,9 +58,7 @@ mod tests {
     const OUTPUT_ZERO_POINT: [i8; 1] = [16];
     const CONSTANTS: (f32, f32) = (0.866_666_7, 3.866_666_6);
     const OUTPUT: Tensor4D<i8, 1, 1, 1, 2, 1> = Tensor4D {
-        buffer: [matrix![
-            [9, 10]
-        ]],
+        buffer: [matrix![[9, 10]]],
         scale: [0.15],
         zero_point: [16],
     };

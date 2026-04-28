@@ -23,12 +23,8 @@ pub struct StreamingGlobalAveragePool2D<
     pub out_cycle: usize,
 }
 
-impl<
-        T: Quantized,
-        const INPUT_ROWS: usize,
-        const INPUT_COLS: usize,
-        const INPUT_CHANS: usize,
-    > StreamingGlobalAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS>
+impl<T: Quantized, const INPUT_ROWS: usize, const INPUT_COLS: usize, const INPUT_CHANS: usize>
+    StreamingGlobalAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS>
 {
     pub fn new(
         input_zero_point: T,
@@ -63,12 +59,8 @@ impl<
     }
 }
 
-impl<
-        T: Quantized,
-        const INPUT_ROWS: usize,
-        const INPUT_COLS: usize,
-        const INPUT_CHANS: usize,
-    > StreamOp<T, INPUT_CHANS, INPUT_CHANS>
+impl<T: Quantized, const INPUT_ROWS: usize, const INPUT_COLS: usize, const INPUT_CHANS: usize>
+    StreamOp<T, INPUT_CHANS, INPUT_CHANS>
     for StreamingGlobalAveragePool2D<T, INPUT_ROWS, INPUT_COLS, INPUT_CHANS>
 {
     #[inline(always)]
@@ -127,9 +119,7 @@ mod tests {
     const OUTPUT_ZERO_POINT: [i8; 1] = [16];
     const CONSTANTS: (f32, f32) = (0.866_666_7, 3.866_666_6);
     const OUTPUT: Tensor4D<i8, 1, 1, 1, 2, 1> = Tensor4D {
-        buffer: [matrix![
-            [9, 10]
-        ]],
+        buffer: [matrix![[9, 10]]],
         scale: [0.15],
         zero_point: [16],
     };
@@ -151,7 +141,7 @@ mod tests {
             1, // OUTPUT_ROWS
             1, // OUTPUT_COLS
             2, // OUTPUT_CHANS
-            _
+            _,
         >(&INPUT, op);
         assert_eq!(result, OUTPUT);
     }

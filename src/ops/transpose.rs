@@ -1,7 +1,7 @@
-use core::array;
 use crate::buffer::{Buffer2D, Buffer4D};
 use crate::quantize::Quantized;
 use crate::tensor::{Tensor2D, Tensor4D};
+use core::array;
 
 /// transpose for rank-2 tensors. `perm` must be a permutation of `[0, 1]`
 ///  output dimensions stay consistent with the permutation.
@@ -108,26 +108,26 @@ mod tests {
             [0],
         );
         let out: Tensor4D<i8, 2, 2, 3, 2, 1> = transpose_4d(t, [0, 1, 2, 3]);
-        assert_eq!(out.buffer, [
-            matrix![
-                [1, 2], [3, 4], [5, 6];
-                [7, 8], [9, 10], [11, 12]
-            ],
-            matrix![
-                [13, 14], [15, 16], [17, 18];
-                [19, 20], [21, 22], [23, 24]
-            ],
-        ]);
+        assert_eq!(
+            out.buffer,
+            [
+                matrix![
+                    [1, 2], [3, 4], [5, 6];
+                    [7, 8], [9, 10], [11, 12]
+                ],
+                matrix![
+                    [13, 14], [15, 16], [17, 18];
+                    [19, 20], [21, 22], [23, 24]
+                ],
+            ]
+        );
     }
 
     #[test]
     fn transpose_4d_batch_channel_swap() {
         // (B,R,C,CH) = (2,1,2,2) — swap batch (0) and channels (3) -> (2,1,2,2) with perm [3,1,2,0]
         let t = Tensor4D::new(
-            [
-                matrix![[1, 2], [3, 4]],
-                matrix![[5, 6], [7, 8]],
-            ],
+            [matrix![[1, 2], [3, 4]], matrix![[5, 6], [7, 8]]],
             [1.0],
             [0],
         );

@@ -3,7 +3,6 @@ use libm::roundf;
 
 use simba::scalar::SupersetOf;
 
-
 use crate::activation::{relu, relu6, FusedActivation};
 use crate::buffer::Buffer2D;
 use crate::quantize::Quantized;
@@ -13,7 +12,7 @@ use crate::tensor::Tensor4D;
 use crate::ops_options::conv_2d::Conv2DOptions;
 
 /// Performs the Conv2D operation with streaming.
-/// When pushing a data point, return optionally a result, 
+/// When pushing a data point, return optionally a result,
 /// corresponding to the computation of a resulting data point.
 ///
 /// # Arguments
@@ -23,8 +22,6 @@ use crate::ops_options::conv_2d::Conv2DOptions;
 /// * `output_zero_point` - The zero point of the resulting output tensor
 /// * `options` - Operator's options as an [`Conv2DOptions`] struct
 /// * `constants` - Constant values coming from the pre-processing phase
-///
-
 pub struct StreamingConv2D<
     T: Quantized,
     const INPUT_ROWS: usize,
@@ -40,14 +37,7 @@ pub struct StreamingConv2D<
     pub write_idx: usize,
 
     input_zero_point: T,
-    filters: Tensor4D<
-        T,
-        FILTERS_BATCHES,
-        FILTERS_ROWS,
-        FILTERS_COLS,
-        INPUT_CHANS,
-        FILTERS_QUANTS,
-    >,
+    filters: Tensor4D<T, FILTERS_BATCHES, FILTERS_ROWS, FILTERS_COLS, INPUT_CHANS, FILTERS_QUANTS>,
     output_scale: [f32; 1],
     output_zero_point: [T; 1],
     options: Conv2DOptions,
@@ -59,7 +49,7 @@ pub struct StreamingConv2D<
 
     pub shift_rows: usize,
     pub shift_cols: usize,
-    
+
     pub in_cycle: usize,
     pub out_cycle: usize,
 }
@@ -74,7 +64,8 @@ impl<
         const FILTERS_COLS: usize,
         const FILTERS_QUANTS: usize,
         const BUF_SIZE: usize,
-    > StreamingConv2D<
+    >
+    StreamingConv2D<
         T,
         INPUT_ROWS,
         INPUT_COLS,
@@ -106,9 +97,7 @@ impl<
     ) -> Self {
         let filter_sums = array::from_fn(|b| {
             filters.buffer[b].iter().fold(0i32, |acc, row| {
-                acc + row
-                    .iter()
-                    .fold(0i32, |acc, e| acc + i32::from_subset(e))
+                acc + row.iter().fold(0i32, |acc, e| acc + i32::from_subset(e))
             })
         });
 
@@ -136,11 +125,16 @@ impl<
         }
     }
 
-
     fn sample(&self, src_row: isize, src_col: isize) -> Option<[T; INPUT_CHANS]> {
-        if src_col < 0 || src_col >= INPUT_COLS as isize || src_row < 0 || src_row >= INPUT_ROWS as isize {
+        if src_col < 0
+            || src_col >= INPUT_COLS as isize
+            || src_row < 0
+            || src_row >= INPUT_ROWS as isize
+        {
             return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
+                crate::tensor::TensorViewPadding::Same => {
+                    Some([self.input_zero_point; INPUT_CHANS])
+                }
                 crate::tensor::TensorViewPadding::Valid => None,
             };
         }
@@ -154,7 +148,9 @@ impl<
 
         if target_cycle > current_cycle {
             return match self.options.view_padding {
-                crate::tensor::TensorViewPadding::Same => Some([self.input_zero_point; INPUT_CHANS]),
+                crate::tensor::TensorViewPadding::Same => {
+                    Some([self.input_zero_point; INPUT_CHANS])
+                }
                 crate::tensor::TensorViewPadding::Valid => None,
             };
         }
@@ -172,7 +168,12 @@ impl<
         array::from_fn(|b| {
             let input_zero_point = i32::from_subset(&self.input_zero_point);
             let filters_zero_point = i32::from_subset(
-                &self.filters.zero_point.get(b).copied().unwrap_or(self.filters.zero_point[0]),
+                &self
+                    .filters
+                    .zero_point
+                    .get(b)
+                    .copied()
+                    .unwrap_or(self.filters.zero_point[0]),
             );
 
             let mut dot = 0i32;
@@ -187,10 +188,12 @@ impl<
                     let src_row = center_row as isize + kh as isize - self.shift_rows as isize;
                     let src_col = center_col as isize + kw as isize - self.shift_cols as isize;
 
-                    let x = self.sample(src_row, src_col).unwrap_or([self.input_zero_point; INPUT_CHANS]);
+                    let x = self
+                        .sample(src_row, src_col)
+                        .unwrap_or([self.input_zero_point; INPUT_CHANS]);
 
-                    for c in 0..INPUT_CHANS {
-                        let xv = i32::from_subset(&x[c]);
+                    for (c, x_c) in x.iter().enumerate() {
+                        let xv = i32::from_subset(x_c);
                         let fv = i32::from_subset(&self.filters.buffer[b][(kh, kw)][c]);
                         dot += xv * fv;
                         sum_input += xv;
@@ -201,15 +204,24 @@ impl<
             // ... (Keep your exact constants and activation math here, it is completely correct) ...
             let constants = (
                 self.constants.0[b],
-                self.constants.1.get(b).copied().unwrap_or(self.constants.1[0]),
+                self.constants
+                    .1
+                    .get(b)
+                    .copied()
+                    .unwrap_or(self.constants.1[0]),
                 input_zero_point * self.filter_sums[b],
-                (FILTERS_ROWS * FILTERS_COLS * INPUT_CHANS) as i32 * input_zero_point * filters_zero_point,
+                (FILTERS_ROWS * FILTERS_COLS * INPUT_CHANS) as i32
+                    * input_zero_point
+                    * filters_zero_point,
             );
 
             let y = T::from_superset_unchecked(&roundf(
                 f32::from_subset(&self.output_zero_point[0])
                     + constants.0
-                    + constants.1 * f32::from_subset(&(dot - sum_input * filters_zero_point - constants.2 + constants.3)),
+                    + constants.1
+                        * f32::from_subset(
+                            &(dot - sum_input * filters_zero_point - constants.2 + constants.3),
+                        ),
             ));
 
             match self.options.fused_activation {
@@ -228,15 +240,19 @@ impl<
         }
 
         self.in_cycle += 1;
-        
+
         // Determine target output dimensions
         let out_cols = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1,
-            crate::tensor::TensorViewPadding::Valid => (INPUT_COLS.saturating_sub(FILTERS_COLS)) / self.options.strides.1 + 1,
+            crate::tensor::TensorViewPadding::Same => INPUT_COLS.div_ceil(self.options.strides.1),
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_COLS.saturating_sub(FILTERS_COLS)) / self.options.strides.1 + 1
+            }
         };
         let out_rows = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0,
-            crate::tensor::TensorViewPadding::Valid => (INPUT_ROWS.saturating_sub(FILTERS_ROWS)) / self.options.strides.0 + 1,
+            crate::tensor::TensorViewPadding::Same => INPUT_ROWS.div_ceil(self.options.strides.0),
+            crate::tensor::TensorViewPadding::Valid => {
+                (INPUT_ROWS.saturating_sub(FILTERS_ROWS)) / self.options.strides.0 + 1
+            }
         };
 
         if self.out_cycle >= out_rows * out_cols {
@@ -247,9 +263,15 @@ impl<
         let out_col = self.out_cycle % out_cols;
 
         // 3. Find the bottom-right input coordinate required for this output
-        let req_in_row = out_row * self.options.strides.0 + FILTERS_ROWS.saturating_sub(1).saturating_sub(self.shift_rows);
-        let req_in_col = out_col * self.options.strides.1 + FILTERS_COLS.saturating_sub(1).saturating_sub(self.shift_cols);
-        
+        let req_in_row = out_row * self.options.strides.0
+            + FILTERS_ROWS
+                .saturating_sub(1)
+                .saturating_sub(self.shift_rows);
+        let req_in_col = out_col * self.options.strides.1
+            + FILTERS_COLS
+                .saturating_sub(1)
+                .saturating_sub(self.shift_cols);
+
         // Convert that coordinate back into the linear clock cycle
         let req_cycles = req_in_row * INPUT_COLS + req_in_col + 1;
 
@@ -263,7 +285,6 @@ impl<
         }
     }
 }
-
 
 impl<
         T: Quantized,
@@ -291,17 +312,13 @@ impl<
     #[inline(always)]
     fn is_finished(&self) -> bool {
         let out_cols = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => {
-                (INPUT_COLS + self.options.strides.1 - 1) / self.options.strides.1
-            }
+            crate::tensor::TensorViewPadding::Same => INPUT_COLS.div_ceil(self.options.strides.1),
             crate::tensor::TensorViewPadding::Valid => {
                 (INPUT_COLS.saturating_sub(FILTERS_COLS)) / self.options.strides.1 + 1
             }
         };
         let out_rows = match self.options.view_padding {
-            crate::tensor::TensorViewPadding::Same => {
-                (INPUT_ROWS + self.options.strides.0 - 1) / self.options.strides.0
-            }
+            crate::tensor::TensorViewPadding::Same => INPUT_ROWS.div_ceil(self.options.strides.0),
             crate::tensor::TensorViewPadding::Valid => {
                 (INPUT_ROWS.saturating_sub(FILTERS_ROWS)) / self.options.strides.0 + 1
             }
@@ -323,15 +340,14 @@ impl<
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use nalgebra::matrix;
 
+    use crate::activation::FusedActivation;
     use crate::buffer::Buffer2D;
     use crate::ops_options::conv_2d::Conv2DOptions;
     use crate::streaming_ops::stream_pipeline::stream_pipeline;
-    use crate::activation::FusedActivation;
     use crate::tensor::{Tensor4D, TensorViewPadding};
 
     use super::*; // your StreamingConv2D
@@ -402,7 +418,7 @@ mod tests {
             2, // OUTPUT_ROWS
             3, // OUTPUT_COLS
             2, // OUTPUT_CHANS
-            _
+            _,
         >(&INPUT, op);
 
         assert_eq!(result, OUTPUT_REF);

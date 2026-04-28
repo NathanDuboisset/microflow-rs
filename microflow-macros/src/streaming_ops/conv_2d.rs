@@ -30,14 +30,10 @@ pub(crate) fn parse(
     let inputs = operator.inputs().unwrap();
     let input_type = tensors.get(inputs.get(0) as usize).type_();
     match input_type {
-        TensorType::INT8 => {
-            TokenStreamingConv2D::<i8>::new(operator, tensors, buffers, index)
-                .to_streaming_node(quote! { i8 })
-        }
-        TensorType::UINT8 => {
-            TokenStreamingConv2D::<u8>::new(operator, tensors, buffers, index)
-                .to_streaming_node(quote! { u8 })
-        }
+        TensorType::INT8 => TokenStreamingConv2D::<i8>::new(operator, tensors, buffers, index)
+            .to_streaming_node(quote! { i8 }),
+        TensorType::UINT8 => TokenStreamingConv2D::<u8>::new(operator, tensors, buffers, index)
+            .to_streaming_node(quote! { u8 }),
         input_type => abort_call_site!(
             "StreamingConv2D supports only INT8/UINT8 input tensors, got {:?}",
             input_type
@@ -103,11 +99,11 @@ impl<T: TokenQuantized> TokenStreamingConv2D<T> {
         let filters_ident = format_ident!("filters_{}", self.index);
         let filters_type = self.filters.type_tokens();
         let filters = &self.filters;
-        
+
         let input_zp = &self.input.zero_point[0];
         let output_scale = &self.output.scale;
         let output_zero_point = &self.output.zero_point;
-        
+
         let fused_activation = self.fused_activation;
         let view_padding = self.view_padding;
         let (strides_0, strides_1) = self.strides;
@@ -119,7 +115,11 @@ impl<T: TokenQuantized> TokenStreamingConv2D<T> {
         let f_r = self.filters.shape[1];
         let f_c = self.filters.shape[2];
         let f_q = self.filters.scale.len();
-        let buf_size = if f_r == 0 { 0usize } else { (f_r - 1) * in_c + f_c };
+        let buf_size = if f_r == 0 {
+            0usize
+        } else {
+            (f_r - 1) * in_c + f_c
+        };
 
         let setup_tokens = quote! {
             const #filters_ident: #filters_type = #filters;
