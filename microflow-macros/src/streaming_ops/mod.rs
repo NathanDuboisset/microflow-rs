@@ -19,6 +19,8 @@ pub struct StreamingNode {
     pub in_shape: Vec<usize>,
     /// The shape of the output tensor leaving this specific operator
     pub out_shape: Vec<usize>,
+    /// The operator index within the model (used for timing labels).
+    pub index: usize,
 }
 
 /// Returns true when the operator should be compiled through the streaming pipeline.

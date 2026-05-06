@@ -26,6 +26,12 @@ nalgebra = { version = "0.32", default-features = false, features = ["macros"] }
 simba = { version = "0.8", default-features = false }
 libm = "0.2"
 
+[features]
+default = []
+# Per-layer timing via ariel-os. Consumer crate must depend on ariel-os with
+# the `time` feature; also set `enable_timing = true` in `#[model(...)]`.
+ariel-os = []
+
 [dev-dependencies]
 csv = "1.2"
 criterion = "0.5"

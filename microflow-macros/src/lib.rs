@@ -11,7 +11,7 @@ use proc_macro_error::{abort_call_site, proc_macro_error};
 use std::fs;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, ToTokens};
+use quote::{format_ident, quote, ToTokens};
 use syn::{parse_macro_input, ItemStruct};
 
 use crate::tflite_flatbuffers::tflite::TensorType;
@@ -37,6 +37,7 @@ struct Args {
     #[struct_meta(unnamed)]
     path: LitStr,
     enable_kernel_streaming: Option<LitBool>,
+    enable_timing: Option<LitBool>,
 }
 
 /// The entry point of MicroFlow.
@@ -51,6 +52,10 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as ItemStruct);
     let enable_kernel_streaming = args
         .enable_kernel_streaming
+        .map(|lit| lit.value())
+        .unwrap_or(false);
+    let enable_timing = args
+        .enable_timing
         .map(|lit| lit.value())
         .unwrap_or(false);
 
@@ -163,7 +168,7 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         if enable_kernel_streaming {
-            stream_pipeline.flush(&mut layers);
+            flush_pipeline(&mut stream_pipeline, &mut layers, enable_timing);
         }
 
         let layer: Box<dyn ToTokens> = match opcode {
@@ -181,10 +186,23 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
             BuiltinOperator::TRANSPOSE => transpose::parse(operator, tensors, buffers),
             unsupported_op => abort_call_site!("unsupported operator: {:?}", unsupported_op),
         };
-        layer.to_tokens(&mut layers)
+
+        if enable_timing {
+            let mut layer_ts = TokenStream2::new();
+            layer.to_tokens(&mut layer_ts);
+            let opcode_name = format!("{:?}", opcode);
+            let start_ident = format_ident!("__ml_start_{}", index);
+            layers.extend(quote! {
+                let #start_ident = ::microflow::__layer_start!();
+                #layer_ts
+                ::microflow::__layer_end!(#opcode_name, #index, #start_ident);
+            });
+        } else {
+            layer.to_tokens(&mut layers);
+        }
     }
     if enable_kernel_streaming {
-        stream_pipeline.flush(&mut layers);
+        flush_pipeline(&mut stream_pipeline, &mut layers, enable_timing);
     }
 
     let output = tensors.get(subgraph.outputs().unwrap().get(0) as usize);
@@ -250,4 +268,23 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     fs::write("target/microflow-expansion.rs", ts.to_string()).ok();
 
     ts.into()
+}
+
+fn flush_pipeline(pipeline: &mut StreamPipeline, tokens: &mut TokenStream2, timing: bool) {
+    if pipeline.is_empty() {
+        return;
+    }
+    if timing {
+        let pipe_index = pipeline.first_index().unwrap_or(0);
+        let start_ident = format_ident!("__ml_start_stream_{}", pipe_index);
+        let mut body = TokenStream2::new();
+        pipeline.flush(&mut body);
+        tokens.extend(quote! {
+            let #start_ident = ::microflow::__layer_start!();
+            #body
+            ::microflow::__layer_end!("StreamingPipeline", #pipe_index, #start_ident);
+        });
+    } else {
+        pipeline.flush(tokens);
+    }
 }

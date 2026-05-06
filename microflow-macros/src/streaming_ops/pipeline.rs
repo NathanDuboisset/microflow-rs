@@ -17,6 +17,16 @@ impl StreamPipeline {
         self.nodes.push(node);
     }
 
+    /// Returns true if no streaming operator is currently buffered.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Returns the operator index of the first buffered node, if any.
+    pub fn first_index(&self) -> Option<usize> {
+        self.nodes.first().map(|n| n.index)
+    }
+
     /// Flushes the buffered streaming operators into the main token stream.
     /// This writes the setup code, the `.then()` chains, and the final pipeline executor.
     pub fn flush(&mut self, tokens: &mut TokenStream2) {

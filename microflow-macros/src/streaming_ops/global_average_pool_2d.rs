@@ -93,6 +93,7 @@ impl<T: TokenQuantized> TokenStreamingGlobalAveragePool2D<T> {
             input_type: type_tokens,
             in_shape: self.input.shape.clone(),
             out_shape: self.output.shape.clone(),
+            index: self.index,
         }
     }
 }
