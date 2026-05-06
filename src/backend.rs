@@ -14,69 +14,63 @@ pub trait Backend {
     fn wait();
 
     /// Evaluates a function across a 2D grid, potentially in parallel.
-    fn from_fn<T: Send, F, const ROWS: usize, const COLS: usize>(
+    fn from_fn<T: Send + Copy, F, const ROWS: usize, const COLS: usize>(
         func: F,
     ) -> crate::buffer::Buffer2D<T, ROWS, COLS>
     where
         F: Fn(usize, usize) -> T + Sync,
     {
-        use core::mem::MaybeUninit;
         use core::sync::atomic::{AtomicUsize, Ordering};
 
-        // Initialize a 2D array of MaybeUninit explicitly
-        let mut output: [[MaybeUninit<T>; ROWS]; COLS] =
-            core::array::from_fn(|_| core::array::from_fn(|_| MaybeUninit::uninit()));
-        let out_ptr = output.as_mut_ptr() as *mut MaybeUninit<T>;
+        // Safety: T is always a quantized integer type (or array thereof) for which
+        // zero bytes are a valid representation. Workers overwrite every cell before
+        // `wait()` returns, so no zeroed value is ever observed.
+        let mut output: [[T; ROWS]; COLS] = unsafe { core::mem::zeroed() };
+        let output_ptr = output.as_mut_ptr() as *mut T;
 
-        struct Ctx<'a, F, T> {
+        struct Context<'a, F, T> {
             func: &'a F,
-            out_ptr: *mut MaybeUninit<T>,
+            output_ptr: *mut T,
             next_row: AtomicUsize,
         }
 
-        let ctx = Ctx {
+        let context = Context {
             func: &func,
-            out_ptr,
+            output_ptr,
             next_row: AtomicUsize::new(0),
         };
 
-        fn worker<F, T, const R: usize, const C: usize>(arg: usize)
+        fn worker<F, T, const R: usize, const C: usize>(argument: usize)
         where
             F: Fn(usize, usize) -> T + Sync,
             T: Send,
         {
-            let ctx = unsafe { &*(arg as *const Ctx<'_, F, T>) };
+            // Safety: `argument` is a `&Context` erased to `usize` by the caller.
+            // `Backend::wait()` guarantees all workers finish before `context` is dropped.
+            let context = unsafe { &*(argument as *const Context<'_, F, T>) };
             loop {
-                let row = ctx.next_row.fetch_add(1, Ordering::Relaxed);
+                let row = context.next_row.fetch_add(1, Ordering::Relaxed);
                 if row >= R {
                     break;
                 }
-
-                // Compute a whole row (need to have bigger job for it to be worth)
-                for col in 0..C {
-                    let val = (ctx.func)(row, col);
-                    // Column-major: idx = col * R + row
-                    let idx = col * R + row;
+                for column in 0..C {
+                    let value = (context.func)(row, column);
+                    // Safety: each `row` is claimed by exactly one worker via the atomic.
+                    // The column-major index `column * R + row` is therefore unique across
+                    // all concurrent writes, so no two threads alias the same address.
                     unsafe {
-                        ctx.out_ptr.add(idx).write(MaybeUninit::new(val));
+                        *context.output_ptr.add(column * R + row) = value;
                     }
                 }
             }
         }
 
         for _ in 0..ROWS {
-            Self::defer_job(worker::<F, T, ROWS, COLS>, &ctx as *const _ as usize);
+            Self::defer_job(worker::<F, T, ROWS, COLS>, &context as *const _ as usize);
         }
         Self::wait();
 
-        // Convert the initialized array to SMatrix ArrayStorage safely
-        unsafe {
-            let ptr = &output as *const _ as *const crate::buffer::Buffer2D<T, ROWS, COLS>;
-            let buffer = core::ptr::read(ptr);
-            // Forget the original array so its (un)initialized contents aren't dropped
-            core::mem::forget(output);
-            buffer
-        }
+        crate::buffer::Buffer2D::from_array_storage(nalgebra::ArrayStorage(output))
     }
 }
 
@@ -94,29 +88,15 @@ impl Backend for SequentialBackend {
     #[inline(always)]
     fn wait() {}
 
-    // Opt to run synchronously for minimal overhead.
     #[inline(always)]
-    fn from_fn<T: Send, F, const ROWS: usize, const COLS: usize>(
+    fn from_fn<T: Send + Copy, F, const ROWS: usize, const COLS: usize>(
         func: F,
     ) -> crate::buffer::Buffer2D<T, ROWS, COLS>
     where
         F: Fn(usize, usize) -> T + Sync,
     {
-        use core::mem::MaybeUninit;
-        let mut output: [[MaybeUninit<T>; ROWS]; COLS] =
-            core::array::from_fn(|_| core::array::from_fn(|_| MaybeUninit::uninit()));
-
-        for col in 0..COLS {
-            for row in 0..ROWS {
-                output[col][row] = MaybeUninit::new(func(row, col));
-            }
-        }
-
-        unsafe {
-            let ptr = &output as *const _ as *const crate::buffer::Buffer2D<T, ROWS, COLS>;
-            let buffer = core::ptr::read(ptr);
-            core::mem::forget(output);
-            buffer
-        }
+        let output: [[T; ROWS]; COLS] =
+            core::array::from_fn(|column| core::array::from_fn(|row| func(row, column)));
+        crate::buffer::Buffer2D::from_array_storage(nalgebra::ArrayStorage(output))
     }
 }
