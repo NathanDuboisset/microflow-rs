@@ -49,5 +49,11 @@ exclude = ["examples"]
 [patch.crates-io]
 nalgebra = { git = "https://github.com/matteocarnelos/nalgebra" }
 
+[features]
+default = []
+# Per-layer timing via ariel-os. Consumer crate must depend on ariel-os with
+# the `time` feature; also set `enable_timing = true` in `#[model(...)]`.
+ariel-os = []
+
 [profile.release]
 lto = true

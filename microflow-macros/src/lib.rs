@@ -11,13 +11,13 @@ use proc_macro_error::{abort_call_site, proc_macro_error};
 use std::fs;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, ToTokens};
+use quote::{format_ident, quote, ToTokens};
 use syn::{parse_macro_input, ItemStruct};
 
 use crate::tflite_flatbuffers::tflite::TensorType;
 use ops::*;
 use structmeta::StructMeta;
-use syn::LitStr;
+use syn::{LitBool, LitStr};
 use tflite_flatbuffers::tflite::{root_as_model, BuiltinOperator};
 
 mod activation;
@@ -34,6 +34,7 @@ mod tflite_flatbuffers;
 struct Args {
     #[struct_meta(unnamed)]
     path: LitStr,
+    enable_timing: Option<LitBool>,
 }
 
 /// The entry point of MicroFlow.
@@ -46,6 +47,7 @@ struct Args {
 pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as Args);
     let item = parse_macro_input!(item as ItemStruct);
+    let enable_timing = args.enable_timing.map(|lit| lit.value()).unwrap_or(false);
 
     let buf = fs::read(args.path.value()).unwrap_or_else(|_| {
         abort_call_site!(
@@ -114,13 +116,14 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let operators = subgraph.operators().unwrap();
     let mut layers = TokenStream2::new();
     for (index, operator) in operators.iter().enumerate() {
-        let layer: Box<dyn ToTokens> = match BuiltinOperator(
+        let opcode = BuiltinOperator(
             model
                 .operator_codes()
                 .unwrap()
                 .get(operator.opcode_index() as usize)
                 .deprecated_builtin_code() as i32,
-        ) {
+        );
+        let layer: Box<dyn ToTokens> = match opcode {
             BuiltinOperator::FULLY_CONNECTED => {
                 fully_connected::parse(operator, tensors, buffers, index)
             }
@@ -133,7 +136,20 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
             BuiltinOperator::RESHAPE => Box::new(reshape::parse(operator, tensors)),
             unsupported_op => abort_call_site!("unsupported operator: {:?}", unsupported_op),
         };
-        layer.to_tokens(&mut layers)
+
+        if enable_timing {
+            let mut layer_ts = TokenStream2::new();
+            layer.to_tokens(&mut layer_ts);
+            let opcode_name = format!("{:?}", opcode);
+            let start_ident = format_ident!("__ml_start_{}", index);
+            layers.extend(quote! {
+                let #start_ident = ::microflow::__layer_start!();
+                #layer_ts
+                ::microflow::__layer_end!(#opcode_name, #index, #start_ident);
+            });
+        } else {
+            layer.to_tokens(&mut layers);
+        }
     }
 
     let output = tensors.get(subgraph.outputs().unwrap().get(0) as usize);
