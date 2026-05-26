@@ -3,8 +3,8 @@ use crate::quantize::Quantized;
 use crate::tensor::{Tensor2D, Tensor4D};
 use core::array;
 
-/// transpose for 2D tensors. `perm` must be a permutation of `[0, 1]`
-///  output dimensions stay consistent with the permutation.
+/// Transpose for 2D tensors. `perm` must be a permutation of `[0, 1]` output dimensions stay
+/// consistent with the permutation.
 pub fn transpose_2d<
     T: Quantized,
     const IN_ROWS: usize,
@@ -27,8 +27,8 @@ pub fn transpose_2d<
     Tensor2D::new(out_buf, input.scale, input.zero_point)
 }
 
-/// transpose for 4D tensors. `perm` must be a permutation of `[0, 1, 2, 3]`
-///  output dimensions stay consistent with the permutation.
+/// Transpose for 4D tensors. `perm` must be a permutation of `[0, 1, 2, 3]` output dimensions stay
+/// consistent with the permutation.
 pub fn transpose_4d<
     T: Quantized,
     const B: usize,
