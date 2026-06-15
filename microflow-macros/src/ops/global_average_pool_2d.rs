@@ -57,21 +57,39 @@ impl<T: TokenQuantized> TokenGlobalAveragePool2D<T> {
 
 impl<T: TokenQuantized> ToTokens for TokenGlobalAveragePool2D<T> {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let output_shape = &self.output.shape;
+        // The runtime always returns Tensor4D<T,1,1,1,C,1>. tflite usually
+        // stores the output as rank-2 [batch, C] (a MEAN op that folds the
+        // spatial dims). In that case emit a Tensor2D type annotation so the
+        // next op — typically FULLY_CONNECTED — sees a rank-2 tensor; we
+        // recover it via the existing Tensor4D → Tensor2D Into impl.
         let output_scale = &self.output.scale;
         let output_zero_point = &self.output.zero_point;
         let fused_activation = self.fused_activation;
         let (constants_0, constants_1) = self.constants;
+        let call = quote! {
+            microflow::ops::global_average_pool_2d(
+                input,
+                [#(#output_scale),*],
+                [#(#output_zero_point),*],
+                #fused_activation,
+                (#constants_0, #constants_1)
+            )
+        };
 
-        let ts = quote! {
-            let input: microflow::tensor::Tensor4D<_, #(#output_shape),*, 1usize> =
-                microflow::ops::global_average_pool_2d(
-                    input,
-                    [#(#output_scale),*],
-                    [#(#output_zero_point),*],
-                    #fused_activation,
-                    (#constants_0, #constants_1)
-            );
+        let ts = if self.output.shape.len() == 2 {
+            let output_shape = &self.output.shape;
+            quote! {
+                let input: microflow::tensor::Tensor2D<_, #(#output_shape),*, 1usize> =
+                    Into::into(#call);
+            }
+        } else {
+            let mut output_shape = self.output.shape.clone();
+            while output_shape.len() < 4 {
+                output_shape.insert(1, 1);
+            }
+            quote! {
+                let input: microflow::tensor::Tensor4D<_, #(#output_shape),*, 1usize> = #call;
+            }
         };
         ts.to_tokens(tokens);
     }

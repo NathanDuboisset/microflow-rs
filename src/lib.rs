@@ -42,7 +42,7 @@ macro_rules! __layer_end {
     ($name:expr, $index:expr, $start:expr) => {{
         let __end = ::ariel_os::time::Instant::now().as_micros();
         let __start: u64 = $start;
-        ::ariel_os::debug::log::info!(
+        ::ariel_os::log::info!(
             "layer {}: {} took {} us",
             $index as u32,
             $name,

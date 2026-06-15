@@ -18,8 +18,68 @@ use crate::tflite_flatbuffers::tflite::TensorType;
 use ops::*;
 use streaming_ops::pipeline::StreamPipeline;
 use structmeta::StructMeta;
+use syn::parse::{Parse, ParseStream};
 use syn::{LitBool, LitStr};
 use tflite_flatbuffers::tflite::{root_as_model, BuiltinOperator};
+
+/// Path argument: accepts a string literal, `env!("VAR")`, or `concat!(...)`.
+/// `concat!` may nest the other two.
+struct ModelPath(String);
+
+impl Parse for ModelPath {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(LitStr) {
+            return Ok(ModelPath(input.parse::<LitStr>()?.value()));
+        }
+        let mac: syn::Macro = input.parse()?;
+        Ok(ModelPath(expand_path_macro(&mac)?))
+    }
+}
+
+fn expand_path_macro(mac: &syn::Macro) -> syn::Result<String> {
+    let ident = mac
+        .path
+        .get_ident()
+        .ok_or_else(|| syn::Error::new_spanned(&mac.path, "expected macro identifier"))?
+        .to_string();
+    match ident.as_str() {
+        "env" => {
+            let name: LitStr = mac.parse_body()?;
+            std::env::var(name.value()).map_err(|e| {
+                syn::Error::new_spanned(mac, format!("env!({:?}) — {}", name.value(), e))
+            })
+        }
+        "concat" => {
+            enum Part {
+                Lit(LitStr),
+                Mac(syn::Macro),
+            }
+            impl Parse for Part {
+                fn parse(input: ParseStream) -> syn::Result<Self> {
+                    if input.peek(LitStr) {
+                        Ok(Part::Lit(input.parse()?))
+                    } else {
+                        Ok(Part::Mac(input.parse()?))
+                    }
+                }
+            }
+            let parts: syn::punctuated::Punctuated<Part, syn::Token![,]> =
+                mac.parse_body_with(syn::punctuated::Punctuated::parse_terminated)?;
+            let mut out = String::new();
+            for p in parts {
+                out.push_str(&match p {
+                    Part::Lit(l) => l.value(),
+                    Part::Mac(m) => expand_path_macro(&m)?,
+                });
+            }
+            Ok(out)
+        }
+        other => Err(syn::Error::new_spanned(
+            mac,
+            format!("unsupported macro in #[model] path: {other}!"),
+        )),
+    }
+}
 
 mod activation;
 mod buffer;
@@ -35,7 +95,7 @@ mod tflite_flatbuffers;
 #[derive(StructMeta)]
 struct Args {
     #[struct_meta(unnamed)]
-    path: LitStr,
+    path: ModelPath,
     enable_kernel_streaming: Option<LitBool>,
     enable_timing: Option<LitBool>,
 }
@@ -54,15 +114,13 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
         .enable_kernel_streaming
         .map(|lit| lit.value())
         .unwrap_or(false);
-    let enable_timing = args
-        .enable_timing
-        .map(|lit| lit.value())
-        .unwrap_or(false);
+    let enable_timing = args.enable_timing.map(|lit| lit.value()).unwrap_or(false);
 
-    let buf = fs::read(args.path.value()).unwrap_or_else(|_| {
+    let model_path = args.path.0.clone();
+    let buf = fs::read(&model_path).unwrap_or_else(|_| {
         abort_call_site!(
             "couldn't find '{}', please provide a valid path",
-            &args.path.value()
+            model_path
         )
     });
     let model = root_as_model(&buf).unwrap_or_else(|_| {
@@ -79,6 +137,9 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
     let mut input_shape: Vec<_> = input.shape().unwrap().iter().map(|e| e as usize).collect();
     if input_shape.len() == 1 {
         input_shape.insert(0, 1);
+    }
+    if input_shape.len() == 3 {
+        input_shape.push(1);
     }
     let input_rank = input_shape.len();
     let input_type = match input.type_() {
@@ -140,6 +201,13 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let operators = subgraph.operators().unwrap();
     let mut layers = TokenStream2::new();
+    // Imported once so multiple flushed pipelines don't each re-`use ChainExt`
+    // and hit E0252.
+    if enable_kernel_streaming {
+        layers.extend(quote! {
+            use microflow::streaming_ops::stream_op::ChainExt;
+        });
+    }
     let mut stream_pipeline = StreamPipeline::new();
     for (index, operator) in operators.iter().enumerate() {
         let opcode = BuiltinOperator(
@@ -180,8 +248,10 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
             }
             BuiltinOperator::CONV_2D => conv_2d::parse(operator, tensors, buffers, index),
             BuiltinOperator::AVERAGE_POOL_2D => average_pool_2d::parse(operator, tensors),
+            BuiltinOperator::MAX_POOL_2D => max_pool_2d::parse(operator, tensors),
             BuiltinOperator::MEAN => global_average_pool_2d::parse(operator, tensors),
             BuiltinOperator::SOFTMAX => softmax::parse(operator, tensors),
+            BuiltinOperator::LOGISTIC => logistic::parse(operator, tensors),
             BuiltinOperator::RESHAPE => Box::new(reshape::parse(operator, tensors)),
             BuiltinOperator::TRANSPOSE => transpose::parse(operator, tensors, buffers),
             unsupported_op => abort_call_site!("unsupported operator: {:?}", unsupported_op),
