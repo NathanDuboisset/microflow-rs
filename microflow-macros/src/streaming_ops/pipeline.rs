@@ -1,6 +1,21 @@
 use super::StreamingNode;
 use proc_macro2::TokenStream as TokenStream2;
+use proc_macro_error::abort_call_site;
 use quote::quote;
+
+// The pipeline runtime always takes 4D dims. tflite stores MEAN outputs as
+// rank-2 `[batch, C]`, so map that to `(1, 1, C)` here.
+fn pad_4d(shape: &[usize]) -> (usize, usize, usize) {
+    match shape.len() {
+        4 => (shape[1], shape[2], shape[3]),
+        2 => (1, 1, shape[1]),
+        n => abort_call_site!(
+            "streaming pipeline node shape rank {} unsupported (shape {:?})",
+            n,
+            shape
+        ),
+    }
+}
 
 /// Aggregates streaming operators and compiles them into a single chained pipeline.
 pub struct StreamPipeline {
@@ -50,24 +65,25 @@ impl StreamPipeline {
         let last_node = self.nodes.last().expect("streaming pipeline is non-empty");
 
         let input_type = &first_node.input_type;
-        let (in_r, in_c, in_ch) = (
-            first_node.in_shape[1],
-            first_node.in_shape[2],
-            first_node.in_shape[3],
-        );
-        let (out_r, out_c, out_ch) = (
-            last_node.out_shape[1],
-            last_node.out_shape[2],
-            last_node.out_shape[3],
-        );
+        let (in_r, in_c, in_ch) = pad_4d(&first_node.in_shape);
+        let (out_r, out_c, out_ch) = pad_4d(&last_node.out_shape);
+        let collapse_to_2d = last_node.out_shape.len() == 2;
 
         tokens.extend(quote! {
-            use microflow::streaming_ops::stream_op::ChainExt;
-
             let input = microflow::streaming_ops::stream_pipeline::<
                 #input_type, #in_r, #in_c, #in_ch, #out_r, #out_c, #out_ch, _
             >(&input, #chain_expr);
         });
+
+        // `stream_pipeline` always yields Tensor4D<T,1,1,1,C,1>; if the model
+        // stores the output as rank-2 (a MEAN feeding a FULLY_CONNECTED),
+        // reshape so the next op sees the right type.
+        if collapse_to_2d {
+            tokens.extend(quote! {
+                let input: microflow::tensor::Tensor2D<#input_type, 1usize, #out_ch, 1usize> =
+                    microflow::ops::reshape(input);
+            });
+        }
 
         self.nodes.clear();
     }

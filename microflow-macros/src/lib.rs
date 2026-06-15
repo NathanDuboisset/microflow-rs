@@ -54,10 +54,7 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
         .enable_kernel_streaming
         .map(|lit| lit.value())
         .unwrap_or(false);
-    let enable_timing = args
-        .enable_timing
-        .map(|lit| lit.value())
-        .unwrap_or(false);
+    let enable_timing = args.enable_timing.map(|lit| lit.value()).unwrap_or(false);
 
     let buf = fs::read(args.path.value()).unwrap_or_else(|_| {
         abort_call_site!(
