@@ -137,6 +137,13 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let operators = subgraph.operators().unwrap();
     let mut layers = TokenStream2::new();
+    // Imported once so multiple flushed pipelines don't each re-`use ChainExt`
+    // and hit E0252.
+    if enable_kernel_streaming {
+        layers.extend(quote! {
+            use microflow::streaming_ops::stream_op::ChainExt;
+        });
+    }
     let mut stream_pipeline = StreamPipeline::new();
     for (index, operator) in operators.iter().enumerate() {
         let opcode = BuiltinOperator(
