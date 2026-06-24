@@ -226,6 +226,9 @@ pub fn model(args: TokenStream, item: TokenStream) -> TokenStream {
                 BuiltinOperator::AVERAGE_POOL_2D => {
                     streaming_ops::average_pool_2d::parse(operator, tensors, index)
                 }
+                BuiltinOperator::MAX_POOL_2D => {
+                    streaming_ops::max_pool_2d::parse(operator, tensors, index)
+                }
                 BuiltinOperator::MEAN => {
                     streaming_ops::global_average_pool_2d::parse(operator, tensors, index)
                 }
